@@ -44,6 +44,7 @@ from src.app.tab_escape import EscapeTab
 from src.app.workers import (
     ApplyWorker,
     DetailedRefreshWorker,
+    RegistryPatchWorker,
     ScanThread,
     VramDmaScanWorker,
 )
@@ -252,6 +253,7 @@ class MainOverclockWidget(QWidget):
         self._apply_worker = None
         self._auto_apply_pending = False
         self._detailed_worker = None
+        self._startup_reg_worker = None
 
         ensure_startup_points_to_current()
 
@@ -260,6 +262,11 @@ class MainOverclockWidget(QWidget):
                 settings.get("defaults.apply_after_scan_on_startup", False)
             )
             QTimer.singleShot(200, self._on_rescan)
+
+        if settings.get("defaults.apply_registry_on_startup", False):
+            # Delay slightly longer than the scan trigger so the UI is fully ready
+            # before the background registry worker starts.
+            QTimer.singleShot(400, self._on_apply_registry_startup)
 
     # ------------------------------------------------------------------
     # Cheatsheet dialog (shared)
@@ -300,8 +307,40 @@ class MainOverclockWidget(QWidget):
         sb.setValue(sb.maximum())
 
     # ------------------------------------------------------------------
-    # Scan
+    # Startup registry apply
     # ------------------------------------------------------------------
+
+    def _on_apply_registry_startup(self):
+        """Apply recommended registry patches automatically at startup."""
+        if self._startup_reg_worker is not None and self._startup_reg_worker.isRunning():
+            return
+        try:
+            from src.tools.reg_patch import RegistryPatch, RECOMMENDED_VALUES
+            rp = RegistryPatch()
+        except Exception as e:
+            self._log(f"Startup registry patch: could not initialise — {e}")
+            return
+
+        def do_apply():
+            return rp.apply(values=RECOMMENDED_VALUES)
+
+        self._startup_reg_worker = RegistryPatchWorker("apply", do_apply, self)
+        self._startup_reg_worker.finished_signal.connect(self._on_startup_registry_finished)
+        self._startup_reg_worker.finished.connect(self._on_startup_registry_finished_cleanup)
+        self._startup_reg_worker.start()
+        self._log("Startup: applying recommended registry patches...")
+
+    def _on_startup_registry_finished_cleanup(self):
+        self._startup_reg_worker = None
+
+    def _on_startup_registry_finished(self, action: str, result, is_error: bool):
+        if is_error:
+            self._log(f"Startup registry patch: failed — {result}")
+        elif result:
+            self._log(f"Startup: applied {len(result)} registry patch(es).")
+        else:
+            self._log("Startup: registry patches already at recommended values.")
+
 
     def _on_scan_progress(self, pct: float, msg: str):
         self.progress_bar.setValue(int(pct))

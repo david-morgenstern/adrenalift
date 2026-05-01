@@ -100,6 +100,20 @@ class SimpleTab(QWidget):
         )
         startup_vbox.addWidget(self.apply_after_scan_cb)
 
+        self.apply_registry_on_startup_cb = QCheckBox("Apply registry patches on startup")
+        self.apply_registry_on_startup_cb.setToolTip(
+            "Re-apply anti-clock-gating registry patches each time the application starts.\n"
+            "The AMD driver resets its own registry values on every boot; enabling this\n"
+            "option (combined with 'Run on Windows startup') makes those patches persistent."
+        )
+        self.apply_registry_on_startup_cb.setChecked(
+            bool(settings.get("defaults.apply_registry_on_startup", False))
+        )
+        self.apply_registry_on_startup_cb.toggled.connect(
+            lambda v: settings.set("defaults.apply_registry_on_startup", v)
+        )
+        startup_vbox.addWidget(self.apply_registry_on_startup_cb)
+
         outer.addWidget(startup_group)
         outer.addStretch()
 
