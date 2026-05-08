@@ -723,6 +723,23 @@ class SMUTab(QWidget):
             lambda: self._run_with_hardware("Disable FIT Throttler", _disable_fit_fn, require_scan=False))
         actions_lay.addWidget(dis_fit_btn)
 
+        _APCC_BITS = {19, 18, 0, 11}  # GFX_APCC_Plus, FIT, Temp_Edge, Temp_PLX
+
+        def _disable_apcc_fn(hw):
+            for b in _APCC_BITS:
+                self._throttler_checkboxes[b].setChecked(False)
+            mask = _read_throttler_mask()
+            hw["smu"].send_msg(PPSMC.SetThrottlerMask, mask)
+            self._log(f"SMU: Disabled APCC+/FIT/Edge/PLX throttlers, mask = 0x{mask:06X}")
+
+        dis_apcc_btn = QPushButton("Disable APCC+")
+        dis_apcc_btn.setToolTip(
+            "Uncheck bits 19 (GFX_APCC_Plus), 18 (FIT), 0 (Temp_Edge), 11 (Temp_PLX) and apply"
+        )
+        dis_apcc_btn.clicked.connect(
+            lambda: self._run_with_hardware("Disable APCC+ Throttlers", _disable_apcc_fn, require_scan=False))
+        actions_lay.addWidget(dis_apcc_btn)
+
         def _disable_all_clicked():
             reply = QMessageBox.warning(
                 self, "Disable All Throttlers",
