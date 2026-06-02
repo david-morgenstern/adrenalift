@@ -128,14 +128,14 @@ def create_app() -> Flask:
         try:
             return jsonify(hw.read_status())
         except hw.HardwareUnavailable as exc:
-            return jsonify({"ok": False, "error": str(exc)}), 503
+            return jsonify({"ok": False, "error": hw.safe_message(exc)}), 503
 
     @app.route("/api/metrics")
     def api_metrics():
         try:
             return jsonify(hw.read_metrics())
         except hw.HardwareUnavailable as exc:
-            return jsonify({"ok": False, "error": str(exc)}), 503
+            return jsonify({"ok": False, "error": hw.safe_message(exc)}), 503
 
     return app
 

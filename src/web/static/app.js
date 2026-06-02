@@ -105,9 +105,11 @@ function pollJob(jobId, { onProgress, onLog, onDone, onError }) {
     } catch (e) {
       return; // transient; try again
     }
-    if (snap.error && snap.status === undefined) {
+    // 404 / unknown-job response: {"error": ...} with no job fields at all.
+    // (A finished-but-failed job instead has status === "error", handled below.)
+    if (snap.status === undefined) {
       clearInterval(timer);
-      onError && onError(snap.error);
+      onError && onError(snap.error || "Job not found.");
       return;
     }
     since = snap.log_total || since;

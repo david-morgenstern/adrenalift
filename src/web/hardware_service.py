@@ -31,7 +31,56 @@ ProgressFn = Callable[[float, str], None]
 
 
 class HardwareUnavailable(RuntimeError):
-    """Raised when the overclock engine / GPU hardware cannot be used."""
+    """Raised when the overclock engine / GPU hardware cannot be used.
+
+    Carries a stable ``code`` identifying the failure category.  The HTTP layer
+    maps that code to a fixed, human-authored message via :func:`safe_message`
+    so that **no exception-derived text is ever returned to the client** (the
+    raw exception detail is only ever written to the server log).
+    """
+
+    def __init__(self, message: str, code: str = "generic"):
+        super().__init__(message)
+        self.code = code
+
+
+# Fixed, human-authored messages keyed by failure code.  These are the only
+# strings sent to the browser for hardware errors; they never contain stack
+# traces or raw exception text.
+ERROR_MESSAGES: Dict[str, str] = {
+    "engine_unavailable": (
+        "The overclock engine is unavailable on this system. Hardware actions "
+        "require Windows with the AMD driver, the bundled kernel drivers, and "
+        "Administrator privileges. See the server console for details."
+    ),
+    "init_failed": (
+        "Could not initialise the GPU drivers. Make sure the AMD driver and "
+        "bundled kernel drivers are installed and that the server is running "
+        "as Administrator. See the server console for details."
+    ),
+    "no_scan": (
+        "No scan result available. Run a Scan first so Adrenalift knows where "
+        "the driver's clock table lives."
+    ),
+    "dma_unavailable": (
+        "Live metrics need the GPU DMA buffer, which has not been located yet. "
+        "Run a DRAM scan in the desktop app to enable metrics, then try again."
+    ),
+    "metrics_failed": "Failed to read the SMU metrics table.",
+    "generic": "The requested hardware action could not be completed.",
+}
+
+
+def safe_message(exc: "HardwareUnavailable") -> str:
+    """Return a fixed, safe-to-display message for a hardware error.
+
+    The returned value is a controlled literal selected by the exception's
+    ``code``; it is never derived from the underlying exception text.
+    """
+    code = getattr(exc, "code", "generic")
+    if code in ERROR_MESSAGES:
+        return ERROR_MESSAGES[code]
+    return ERROR_MESSAGES["generic"]
 
 
 # Serialise all hardware access: the underlying drivers and SMU mailbox are a
@@ -65,10 +114,7 @@ def _import_engine():
         # (avoids leaking internal stack-trace information over HTTP).
         _log.warning("Overclock engine import failed: %s", exc)
         raise HardwareUnavailable(
-            "The overclock engine is unavailable on this system "
-            f"({platform.system()}). Hardware actions require Windows with the "
-            "AMD driver, the bundled kernel drivers, and Administrator "
-            "privileges. See the server console for details."
+            ERROR_MESSAGES["engine_unavailable"], code="engine_unavailable"
         ) from exc
     return engine
 
@@ -83,8 +129,9 @@ def engine_status() -> Dict[str, Any]:
     try:
         _import_engine()
         info["available"] = True
-    except HardwareUnavailable as exc:
-        info["reason"] = str(exc)
+    except HardwareUnavailable:
+        # Use the fixed message, never the exception text.
+        info["reason"] = ERROR_MESSAGES["engine_unavailable"]
     return info
 
 
@@ -97,12 +144,14 @@ def vbios_summary() -> Dict[str, Any]:
     try:
         from src.app.constants import DEFAULT_VBIOS_PATH, _get_vbios_values
     except Exception as exc:  # noqa: BLE001
-        return {"available": False, "summary": f"VBIOS info unavailable: {exc}"}
+        _log.warning("VBIOS constants import failed: %s", exc)
+        return {"available": False, "summary": "VBIOS information is unavailable."}
 
     try:
         vals = _get_vbios_values(DEFAULT_VBIOS_PATH)
     except Exception as exc:  # noqa: BLE001
-        return {"available": False, "summary": f"VBIOS parse failed: {exc}"}
+        _log.warning("VBIOS parse failed: %s", exc)
+        return {"available": False, "summary": "Could not parse the VBIOS ROM."}
 
     if vals is None:
         return {
@@ -154,10 +203,7 @@ def run_scan(
             except Exception as exc:  # noqa: BLE001
                 _log.warning("init_hardware failed: %s", exc)
                 raise HardwareUnavailable(
-                    "Could not initialise the GPU drivers. Make sure the "
-                    "AMD driver and bundled kernel drivers are installed and "
-                    "that the server is running as Administrator. See the "
-                    "server console for details."
+                    ERROR_MESSAGES["init_failed"], code="init_failed"
                 ) from exc
 
             inpout = hw["inpout"]
@@ -270,10 +316,7 @@ def apply_boost_clock(
     scan_result = _get_cached_result()
     valid = getattr(scan_result, "valid_addrs", None) if scan_result else None
     if not valid:
-        raise HardwareUnavailable(
-            "No scan result available. Run a Scan first so Adrenalift knows "
-            "where the driver's clock table lives."
-        )
+        raise HardwareUnavailable(ERROR_MESSAGES["no_scan"], code="no_scan")
 
     try:
         clock_mhz = int(clock_mhz)
@@ -293,10 +336,7 @@ def apply_boost_clock(
             except Exception as exc:  # noqa: BLE001
                 _log.warning("init_hardware failed: %s", exc)
                 raise HardwareUnavailable(
-                    "Could not initialise the GPU drivers. Make sure the "
-                    "AMD driver and bundled kernel drivers are installed and "
-                    "that the server is running as Administrator. See the "
-                    "server console for details."
+                    ERROR_MESSAGES["init_failed"], code="init_failed"
                 ) from exc
 
             inpout, smu = hw["inpout"], hw["smu"]
@@ -352,10 +392,7 @@ def read_status() -> Dict[str, Any]:
             except Exception as exc:  # noqa: BLE001
                 _log.warning("init_hardware failed: %s", exc)
                 raise HardwareUnavailable(
-                    "Could not initialise the GPU drivers. Make sure the "
-                    "AMD driver and bundled kernel drivers are installed and "
-                    "that the server is running as Administrator. See the "
-                    "server console for details."
+                    ERROR_MESSAGES["init_failed"], code="init_failed"
                 ) from exc
 
             smu = hw["smu"]
@@ -389,21 +426,18 @@ def read_metrics() -> Dict[str, Any]:
             except Exception as exc:  # noqa: BLE001
                 _log.warning("init_hardware failed: %s", exc)
                 raise HardwareUnavailable(
-                    "Could not initialise the GPU drivers. Make sure the "
-                    "AMD driver and bundled kernel drivers are installed and "
-                    "that the server is running as Administrator. See the "
-                    "server console for details."
+                    ERROR_MESSAGES["init_failed"], code="init_failed"
                 ) from exc
 
             if hw.get("virt") is None:
                 raise HardwareUnavailable(
-                    "Live metrics need the GPU DMA buffer, which has not been "
-                    "located yet. Run a DRAM scan in the desktop app to enable "
-                    "metrics, then try again."
+                    ERROR_MESSAGES["dma_unavailable"], code="dma_unavailable"
                 )
             _m, values = engine.read_smu_metrics_full(hw["smu"], hw["virt"])
             if not values:
-                raise HardwareUnavailable("Failed to read SMU metrics table.")
+                raise HardwareUnavailable(
+                    ERROR_MESSAGES["metrics_failed"], code="metrics_failed"
+                )
             return {"ok": True, "metrics": _jsonable(values)}
         finally:
             if hw:
