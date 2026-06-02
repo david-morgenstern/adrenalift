@@ -48,6 +48,24 @@ Because the patch lives only in RAM, it is inherently safe to revert — just re
 
 ---
 
+## Downloads (pre-built Windows exe)
+
+GitHub builds the Windows executables automatically (see
+`.github/workflows/build-windows.yml`):
+
+- **Releases** — every version tag (e.g. `v0.1.4`) publishes a
+  [Release](../../releases) with `Adrenalift_Web_x.x_xx.exe` (browser console)
+  and `Adrenalift_x.x_xx.exe` (desktop GUI) attached. This is the permanent,
+  public download link to share.
+- **Latest build (any commit)** — open the
+  [Actions tab](../../actions/workflows/build-windows.yml), click the most
+  recent run, and download the **adrenalift-windows-exe** artifact (requires
+  being signed in to GitHub; artifacts are kept for 90 days).
+
+To cut a new release: push a tag, e.g. `git tag v0.1.5 && git push origin v0.1.5`.
+
+---
+
 ## Quick Start (pre-built)
 
 1. Download the latest `Adrenalift_x.x_xx.exe` from releases.
@@ -74,12 +92,46 @@ python -m src.web
 
 Then open <http://127.0.0.1:8770> in your browser.
 
-- **Boost Clock** tab — Scan memory, then choose a boost clock and Apply
-  (the same Simple-tab workflow as the desktop app).
-- **Status** tab — read live SMU state, power limit, and DPM clock ranges.
-- **Metrics** tab — live GPU sensor readout (clocks, power, temps, fan, …).
-- **Help** tab — the full set of in-app guides; every control also has a
-  `?` button with a short tip and a plain-language description.
+The web console mirrors the desktop app's full feature set, organised into tabs:
+
+- **Performance** — the settings that actually move performance on RDNA4, in
+  one place: the **power limit (W)** (the most reliable win — sent straight to
+  the firmware, no scan needed), a **GFX clock offset**, an advanced
+  **OverDrive PPT %**, and a one-click safe power-limit template. Also hosts the
+  **Profiles** bar (save / load / apply / import / export).
+- **Boost Clock** — Scan memory, then choose a boost clock and Apply (the same
+  Simple-tab workflow as the desktop app). Tick **Enable OverDrive & metrics
+  (deep scan)** to also locate the GPU DMA buffer, which unlocks the OverDrive
+  editor, GFX-offset / OD-PPT controls, and the live Metrics tab for the session.
+- **OverDrive** — the full firmware OverDrive table: per-field clock offsets,
+  voltage maxima, PPT/TDC, fan curve and temperature limits (needs a deep scan).
+- **PowerPlay** — a per-field editor for every decoded field of the driver's
+  cached PowerPlay table; setting a field patches it in RAM (needs a scan).
+- **SMU** — GFX clock min/max limits and a power-saving lock (disable the
+  idle/clock-gating features that cause downclocking).
+- **Escape** — apply OD via the WDDM **D3DKMTEscape** path, which needs no
+  Administrator privileges.
+- **Metrics** — live GPU sensor readout (clocks, power, temps, fan, …).
+- **Status** — live SMU state, power limit, and DPM clock ranges.
+- **System** — the **persistent** registry/ULPS tweaks (see the caveat below).
+- **Help** — the full set of in-app guides (start with *Performance settings
+  that matter* and *Ephemeral by design*); every control also has a `?` button
+  with a short tip and a plain-language description.
+
+### Ephemeral by design
+
+Everything except the **System** tab is **volatile**: the boost-clock patch,
+OverDrive, PowerPlay, SMU and Escape changes all live in RAM / firmware runtime
+state, so **a reboot returns the GPU to stock**. **Profiles** are saved JSON
+recipes you can export/import and re-apply, but they only ever change that
+volatile state — there is no "apply on startup", so the ephemeral guarantee
+holds.
+
+> **The System (registry) tab is the one exception:** those tweaks write to the
+> Windows registry and **survive a reboot**. Adrenalift takes a backup before
+> the first apply, offers a **Restore** button, and auto-restores on a clean
+> server shutdown — but a hard crash or power loss will not auto-revert, so use
+> Restore. Registry tweaks are deliberately kept out of profiles.
 
 Options:
 
@@ -156,6 +208,28 @@ python -m PyInstaller --noconfirm build.spec
 ```
 
 The output `.exe` is written to `dist/`.
+
+### Building the web console exe
+
+To ship the **browser front-end** as a standalone executable (instead of the
+desktop GUI), use the web build scripts. The resulting exe starts the local web
+server and opens your browser automatically; it bundles the HTML/CSS/JS assets
+and Flask instead of Qt.
+
+```powershell
+.\build_web.ps1
+```
+
+Or manually:
+
+```bash
+python -m PyInstaller --noconfirm build_web.spec
+```
+
+The output `dist\Adrenalift_Web_x.x_xx.exe` requests admin elevation, starts the
+server on <http://127.0.0.1:8770>, and opens the browser. The same driver files
+in `drivers/` and (optional) `bios/vbios.rom` requirements apply as for the
+desktop build.
 
 ### UPP (Uplift Power Play)
 

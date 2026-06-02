@@ -112,6 +112,17 @@ button:hover { background: #353a43; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
 button.primary:hover { background: var(--accent-hover); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
+button.ghost { background: transparent; border-style: dashed; color: var(--muted); }
+button.ghost:hover { background: var(--panel-2); color: var(--text); }
+
+details.card > summary {
+  cursor: pointer;
+  font-size: 15px;
+  list-style: none;
+}
+details.card > summary::-webkit-details-marker { display: none; }
+details.card > summary::before { content: "\25B8  "; color: var(--muted); }
+details.card[open] > summary::before { content: "\25BE  "; }
 
 .muted { color: var(--muted); }
 .status { margin: 10px 0 0; }
@@ -156,6 +167,22 @@ table.kv th, table.kv td {
 }
 table.kv th { color: var(--muted); font-weight: 600; width: 45%; }
 .section-title { margin: 16px 0 6px; color: var(--accent); font-weight: 600; }
+
+/* OD / PP field editors */
+table.editor { border-collapse: collapse; width: 100%; }
+table.editor th, table.editor td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  vertical-align: middle;
+}
+table.editor th { color: var(--text); font-weight: 500; width: 40%; word-break: break-all; }
+table.editor td.cur { color: var(--muted); width: 28%; }
+table.editor input { width: 110px; padding: 4px 6px; }
+table.editor button.set-btn { padding: 4px 12px; font-size: 12px; }
+.result { max-height: 60vh; overflow: auto; }
+input[type="search"] { flex: 1; min-width: 140px; }
 
 .error-box {
   border: 1px solid #5c3330;
