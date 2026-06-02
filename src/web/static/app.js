@@ -120,7 +120,7 @@ function pollJob(jobId, { onProgress, onLog, onDone, onError }) {
       clearInterval(timer);
       onError && onError(snap.error || "Operation failed.");
     }
-  }, 600);
+  }, 1000);
 }
 
 // ---------------------------------------------------------------------------
@@ -281,6 +281,7 @@ async function readMetrics() {
 }
 
 function formatMetric(v) {
+  if (v == null) return "\u2014";
   if (typeof v === "number" && !Number.isInteger(v)) return v.toFixed(2);
   if (Array.isArray(v)) return v.join(", ");
   return String(v);

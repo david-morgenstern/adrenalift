@@ -22,6 +22,10 @@ import threading
 from collections import Counter
 from typing import Any, Callable, Dict, List, Optional
 
+import logging
+
+_log = logging.getLogger("adrenalift.web")
+
 LogFn = Callable[[str], None]
 ProgressFn = Callable[[float, str], None]
 
@@ -57,11 +61,14 @@ def _import_engine():
     try:
         from src.engine import overclock_engine as engine
     except Exception as exc:  # noqa: BLE001 - convert to a friendly message
+        # Log the raw detail server-side only; never return it to the client
+        # (avoids leaking internal stack-trace information over HTTP).
+        _log.warning("Overclock engine import failed: %s", exc)
         raise HardwareUnavailable(
             "The overclock engine is unavailable on this system "
             f"({platform.system()}). Hardware actions require Windows with the "
             "AMD driver, the bundled kernel drivers, and Administrator "
-            f"privileges. Details: {exc}"
+            "privileges. See the server console for details."
         ) from exc
     return engine
 
@@ -145,7 +152,13 @@ def run_scan(
             try:
                 hw = engine.init_hardware(skip_dma_discovery=True)
             except Exception as exc:  # noqa: BLE001
-                raise HardwareUnavailable(f"Hardware init failed: {exc}") from exc
+                _log.warning("init_hardware failed: %s", exc)
+                raise HardwareUnavailable(
+                    "Could not initialise the GPU drivers. Make sure the "
+                    "AMD driver and bundled kernel drivers are installed and "
+                    "that the server is running as Administrator. See the "
+                    "server console for details."
+                ) from exc
 
             inpout = hw["inpout"]
             dma_ok = hw.get("virt") is not None
@@ -278,16 +291,24 @@ def apply_boost_clock(
             try:
                 hw = engine.init_hardware(skip_dma_discovery=True)
             except Exception as exc:  # noqa: BLE001
-                raise HardwareUnavailable(f"Hardware init failed: {exc}") from exc
+                _log.warning("init_hardware failed: %s", exc)
+                raise HardwareUnavailable(
+                    "Could not initialise the GPU drivers. Make sure the "
+                    "AMD driver and bundled kernel drivers are installed and "
+                    "that the server is running as Administrator. See the "
+                    "server console for details."
+                ) from exc
 
             inpout, smu = hw["inpout"], hw["smu"]
+            # ``progress`` (the job's set_progress) already records each message
+            # in the job log, so don't also call ``log`` here or lines double up.
             results = engine.apply_clocks_only(
                 inpout,
                 smu,
                 scan_result,
                 settings,
                 vbios_values=vbios,
-                progress_callback=lambda pct, msg: (progress(pct, msg), log(msg)),
+                progress_callback=progress,
             )
             patched = results.get("patched_count", 0)
             skipped = results.get("skipped_count", 0)
@@ -329,7 +350,13 @@ def read_status() -> Dict[str, Any]:
             try:
                 hw = engine.init_hardware(skip_dma_discovery=True)
             except Exception as exc:  # noqa: BLE001
-                raise HardwareUnavailable(f"Hardware init failed: {exc}") from exc
+                _log.warning("init_hardware failed: %s", exc)
+                raise HardwareUnavailable(
+                    "Could not initialise the GPU drivers. Make sure the "
+                    "AMD driver and bundled kernel drivers are installed and "
+                    "that the server is running as Administrator. See the "
+                    "server console for details."
+                ) from exc
 
             smu = hw["smu"]
             state = engine.query_smu_state(smu)
@@ -360,7 +387,13 @@ def read_metrics() -> Dict[str, Any]:
             try:
                 hw = engine.init_hardware(skip_dma_discovery=True)
             except Exception as exc:  # noqa: BLE001
-                raise HardwareUnavailable(f"Hardware init failed: {exc}") from exc
+                _log.warning("init_hardware failed: %s", exc)
+                raise HardwareUnavailable(
+                    "Could not initialise the GPU drivers. Make sure the "
+                    "AMD driver and bundled kernel drivers are installed and "
+                    "that the server is running as Administrator. See the "
+                    "server console for details."
+                ) from exc
 
             if hw.get("virt") is None:
                 raise HardwareUnavailable(
