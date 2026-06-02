@@ -48,6 +48,24 @@ Because the patch lives only in RAM, it is inherently safe to revert — just re
 
 ---
 
+## Downloads (pre-built Windows exe)
+
+GitHub builds the Windows executables automatically (see
+`.github/workflows/build-windows.yml`):
+
+- **Releases** — every version tag (e.g. `v0.1.4`) publishes a
+  [Release](../../releases) with `Adrenalift_Web_x.x_xx.exe` (browser console)
+  and `Adrenalift_x.x_xx.exe` (desktop GUI) attached. This is the permanent,
+  public download link to share.
+- **Latest build (any commit)** — open the
+  [Actions tab](../../actions/workflows/build-windows.yml), click the most
+  recent run, and download the **adrenalift-windows-exe** artifact (requires
+  being signed in to GitHub; artifacts are kept for 90 days).
+
+To cut a new release: push a tag, e.g. `git tag v0.1.5 && git push origin v0.1.5`.
+
+---
+
 ## Quick Start (pre-built)
 
 1. Download the latest `Adrenalift_x.x_xx.exe` from releases.

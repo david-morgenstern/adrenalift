@@ -1,0 +1,65 @@
+name: Build Windows exe
+
+# Builds the Adrenalift Windows executables with PyInstaller.
+#
+# - On every push to main / PR / manual run: uploads the .exe files as a
+#   downloadable workflow *artifact* (grab them from the run's "Artifacts"
+#   section; requires being signed in to GitHub, kept for 90 days).
+# - On pushing a version tag like `v0.1.4`: also publishes a GitHub *Release*
+#   with the .exe files attached, giving a permanent public download link.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:        # lets you run it by hand from the Actions tab
+
+permissions:
+  contents: write           # needed to create a Release on tag builds
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Clone the UPP dependency (VBIOS decoding)
+        run: git clone --depth 1 https://github.com/sibradzic/upp.git deps/upp
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build the web console exe
+        run: python -m PyInstaller --noconfirm build_web.spec
+
+      - name: Build the desktop GUI exe
+        run: python -m PyInstaller --noconfirm build.spec
+
+      - name: List build output
+        run: dir dist
+
+      - name: Upload exe artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: adrenalift-windows-exe
+          path: dist/*.exe
+          if-no-files-found: error
+
+      - name: Publish Release (tag builds only)
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/*.exe \
+            --title "Adrenalift ${GITHUB_REF_NAME}" \
+            --generate-notes
