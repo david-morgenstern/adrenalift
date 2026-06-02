@@ -73,6 +73,8 @@ a = Analysis(
         "src.web.hardware_service",
         "src.web.jobs",
         "src.web.tooltips",
+        "src.web.profiles",
+        "src.web.registry_service",
         # The web layer reaches into a few app/engine modules:
         "src.app.constants",
         "src.app.settings",

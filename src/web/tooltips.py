@@ -202,6 +202,89 @@ TOOLTIPS: Dict[str, Tooltip] = {
             "freeze the current snapshot or to reduce background SMU traffic."
         ),
     },
+    # -- Profiles ---------------------------------------------------------
+    "profiles": {
+        "tip": "Save, export, import and re-apply bundles of tuning settings.",
+        "description": (
+            "A profile is a saved recipe of your settings (power limit, boost "
+            "clock, GFX offset, OD PPT, …). <b>Save current</b> writes the "
+            "Performance-tab values to a file; <b>Apply</b> pushes a saved "
+            "profile to the GPU; <b>Export</b>/<b>Import</b> move the file "
+            "between machines. Profiles deliberately never contain the "
+            "persistent registry tweaks, and nothing is applied automatically "
+            "on boot — so a reboot always returns the GPU to stock and you "
+            "re-apply the profile yourself."
+        ),
+    },
+    # -- OverDrive table --------------------------------------------------
+    "overdrive": {
+        "tip": "The firmware OverDrive table: clocks, voltage, power, fan, temps.",
+        "description": (
+            "The full set of OverDrive knobs the SMU exposes — GFX/UCLK/FCLK "
+            "offsets and limits, voltage maxima, PPT/TDC percentages, fan curve "
+            "and temperature targets. Each field is read live and applied "
+            "individually. This needs a <b>deep scan</b> first (to locate the "
+            "DMA buffer). RDNA4 firmware may clamp aggressive values; change one "
+            "at a time. Everything reverts on reboot."
+        ),
+    },
+    # -- PowerPlay editor -------------------------------------------------
+    "powerplay": {
+        "tip": "Per-field editor for the driver's cached PowerPlay table (RAM).",
+        "description": (
+            "Shows every field Adrenalift can decode from your VBIOS PowerPlay "
+            "table. Setting a field writes that value into the driver's cached "
+            "copy in RAM across all scanned addresses (run a <b>Scan</b> first). "
+            "This is a power-user tool — incorrect values can crash the "
+            "driver or corrupt the display. As always, a reboot restores the "
+            "stock table."
+        ),
+    },
+    # -- SMU controls -----------------------------------------------------
+    "freq_limits": {
+        "tip": "Pin the GFX clock to a min/max MHz window.",
+        "description": (
+            "Sends soft and hard min/max frequency limits for the graphics "
+            "clock straight to the firmware. Use a min to stop the card "
+            "downclocking at idle, or a max to cap it. Leave a field at 0 to "
+            "leave it unchanged. Reverts on reboot."
+        ),
+    },
+    "power_lock": {
+        "tip": "Disable the idle/clock-gating features that cause downclocking.",
+        "description": (
+            "Turns off DS_GFXCLK, GFX_ULV and GFXOFF — the power-saving "
+            "features that let the GPU drop its clocks when it thinks it is "
+            "idle. Locking them can keep clocks high for benchmarking but raises "
+            "idle power and heat. <b>Unlock</b> restores stock behaviour; so "
+            "does a reboot."
+        ),
+    },
+    # -- Escape -----------------------------------------------------------
+    "escape": {
+        "tip": "Apply OD via the WDDM D3DKMTEscape path — no admin needed.",
+        "description": (
+            "An alternative way to push OD settings, using the same "
+            "D3DKMTEscape OD8 interface AMD's own Adrenalin software uses at "
+            "runtime. It does not require Administrator privileges. Only the "
+            "high-level knobs that map to OD8 entries are exposed (clock "
+            "ceiling, power, GFX offset); leave a field at 0 to skip it. Effects "
+            "are volatile and reset on reboot."
+        ),
+    },
+    # -- Registry (persistent) -------------------------------------------
+    "registry": {
+        "tip": "Persistent driver registry tweaks — these survive a reboot!",
+        "description": (
+            "Disables driver-level power-saving / clock-gating behaviour by "
+            "writing values under the GPU's registry key. <b>Unlike everything "
+            "else in Adrenalift, these persist across reboots.</b> A backup is "
+            "taken before the first apply; press <b>Restore</b> (or shut the "
+            "server down cleanly, which auto-restores) to revert. A hard crash "
+            "or power loss will not auto-revert — use Restore. These are "
+            "intentionally kept out of profiles."
+        ),
+    },
     # -- VBIOS ------------------------------------------------------------
     "vbios": {
         "tip": "Stock clock and power values read from your card's VBIOS ROM.",
@@ -266,12 +349,46 @@ the throttling readout on the <b>Metrics</b> tab. Everything here lives only in
 RAM &mdash; a reboot restores stock values.</p>
 """
 
+EPHEMERAL_HELP_HTML = """
+<h3>Ephemeral by design</h3>
+<p>Almost everything Adrenalift does lives only in volatile state &mdash; the
+driver's in-RAM PowerPlay table, the SMU's runtime settings, the OverDrive
+table, the D3DKMTEscape path. <b>A reboot wipes all of it and returns your GPU
+to stock.</b> That is deliberate: it makes aggressive experiments safe to back
+out of &mdash; if something misbehaves, just restart.</p>
+
+<h4>The one exception: registry tweaks (System tab)</h4>
+<p>The <b>System</b> tab's registry/ULPS tweaks are different: they write to the
+Windows registry and <b>survive a reboot</b>. To keep them manageable:</p>
+<ul>
+  <li>They are <b>never</b> stored in a profile.</li>
+  <li>A backup is taken before the first apply.</li>
+  <li>There is a <b>Restore</b> button, and a clean server shutdown
+      auto-restores them.</li>
+  <li>A hard crash or power loss cannot auto-revert &mdash; use Restore (the
+      backup file is kept for exactly that).</li>
+</ul>
+
+<h4>Profiles</h4>
+<p>Profiles are saved <i>recipes</i>. Saving or exporting writes a JSON file to
+disk &mdash; that is the point. But applying a profile only ever changes the
+volatile state above, and there is no &ldquo;apply on startup&rdquo; option, so
+the ephemeral guarantee holds: after a reboot the GPU is at stock and you
+re-apply the profile yourself whenever you want it back.</p>
+"""
+
 _HELP_PAGES_META: List[Dict[str, str]] = [
     {
         "id": "performance",
         "title": "Performance settings that matter",
         "summary": "Start here \u2014 the few knobs that actually help on RDNA4.",
         "html": PERFORMANCE_HELP_HTML,
+    },
+    {
+        "id": "ephemeral",
+        "title": "Ephemeral by design",
+        "summary": "What reverts on reboot, what persists, and how profiles fit.",
+        "html": EPHEMERAL_HELP_HTML,
     },
     {
         "id": "how_it_works",

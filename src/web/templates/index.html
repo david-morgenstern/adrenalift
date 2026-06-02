@@ -20,8 +20,13 @@
   <nav class="tabs" role="tablist">
     <button class="tab active" data-tab="performance" role="tab">Performance</button>
     <button class="tab" data-tab="home" role="tab">Boost Clock</button>
-    <button class="tab" data-tab="status" role="tab">Status</button>
+    <button class="tab" data-tab="overdrive" role="tab">OverDrive</button>
+    <button class="tab" data-tab="powerplay" role="tab">PowerPlay</button>
+    <button class="tab" data-tab="smu" role="tab">SMU</button>
+    <button class="tab" data-tab="escape" role="tab">Escape</button>
     <button class="tab" data-tab="metrics" role="tab">Metrics</button>
+    <button class="tab" data-tab="status" role="tab">Status</button>
+    <button class="tab" data-tab="system" role="tab">System</button>
     <button class="tab" data-tab="help" role="tab">Help</button>
   </nav>
 
@@ -36,6 +41,30 @@
           reboot restores stock values.
         </p>
         <p id="perf-vbios-line" class="muted"></p>
+      </div>
+
+      <div class="card">
+        <h3>Profiles <span class="help-anchor" data-help="profiles"></span></h3>
+        <p class="muted">
+          Save the current Performance settings as a reusable profile, or load
+          and apply a saved one. Profiles are files you can export/import.
+          They never include the persistent registry tweaks, and nothing is
+          applied automatically &mdash; a reboot still reverts everything.
+        </p>
+        <div class="row">
+          <select id="profile-select"><option value="">— saved profiles —</option></select>
+          <button id="profile-apply-btn" class="primary">Apply</button>
+          <button id="profile-load-btn" class="ghost">Load into form</button>
+          <button id="profile-delete-btn" class="ghost">Delete</button>
+        </div>
+        <div class="row">
+          <input type="text" id="profile-name" placeholder="New profile name" />
+          <button id="profile-save-btn">Save current</button>
+          <button id="profile-export-btn" class="ghost">Export selected</button>
+          <button id="profile-import-btn" class="ghost">Import…</button>
+          <input type="file" id="profile-import-file" accept="application/json,.json" hidden />
+        </div>
+        <p id="profile-status" class="status muted"></p>
       </div>
 
       <div class="card">
@@ -184,6 +213,118 @@
         </div>
         <div id="metrics-result" class="result"></div>
       </div>
+    </section>
+
+    <!-- ========================== OVERDRIVE ========================== -->
+    <section id="tab-overdrive" class="panel" role="tabpanel">
+      <div class="card">
+        <h3>OverDrive table <span class="help-anchor" data-help="overdrive"></span></h3>
+        <p class="muted">
+          The firmware OverDrive table: clock offsets, voltage, power, fan and
+          temperature limits. Needs a <b>deep scan</b> first (Boost Clock tab).
+          Each field is applied individually. All changes revert on reboot.
+        </p>
+        <div class="row">
+          <button id="od-read-btn" class="primary">Read OverDrive table</button>
+          <input type="search" id="od-filter" placeholder="Filter fields…" />
+        </div>
+        <div id="od-result" class="result"><p class="muted">Press “Read OverDrive table”.</p></div>
+        <p id="od-status" class="status muted"></p>
+      </div>
+      <div class="card"><h3>Activity log</h3><pre id="od-log" class="log"></pre></div>
+    </section>
+
+    <!-- ========================== POWERPLAY ========================== -->
+    <section id="tab-powerplay" class="panel" role="tabpanel">
+      <div class="card">
+        <h3>PowerPlay table editor <span class="help-anchor" data-help="powerplay"></span></h3>
+        <p class="muted">
+          Every decoded field of the driver's cached PowerPlay table. Editing a
+          field patches it in RAM across all scanned copies (needs a <b>Scan</b>
+          first). This is for power users &mdash; wrong values can crash the
+          driver. A reboot restores everything.
+        </p>
+        <div class="row">
+          <button id="pp-read-btn" class="primary">Load PP fields</button>
+          <input type="search" id="pp-filter" placeholder="Filter fields…" />
+        </div>
+        <div id="pp-result" class="result"><p class="muted">Press “Load PP fields”.</p></div>
+        <p id="pp-status" class="status muted"></p>
+      </div>
+      <div class="card"><h3>Activity log</h3><pre id="pp-log" class="log"></pre></div>
+    </section>
+
+    <!-- ============================= SMU ============================= -->
+    <section id="tab-smu" class="panel" role="tabpanel">
+      <div class="card">
+        <h3>GFX clock limits <span class="help-anchor" data-help="freq_limits"></span></h3>
+        <p class="muted">Pin the graphics clock to a min/max window (MHz). Leave a field 0 to skip it.</p>
+        <div class="row">
+          <label for="gfx-min">GFX min</label>
+          <input type="number" id="gfx-min" min="0" max="4000" step="5" value="0" />
+          <label for="gfx-max">GFX max</label>
+          <input type="number" id="gfx-max" min="0" max="4000" step="5" value="0" />
+          <button id="freq-btn" class="primary">Apply clock limits</button>
+        </div>
+        <p id="freq-status" class="status muted"></p>
+      </div>
+      <div class="card">
+        <h3>Power-saving lock <span class="help-anchor" data-help="power_lock"></span></h3>
+        <p class="muted">
+          Disable the idle/clock-gating features (DS_GFXCLK, GFX_ULV, GFXOFF)
+          that cause downclocking, or re-enable them. Reverts on reboot.
+        </p>
+        <div class="row">
+          <button id="lock-btn" class="primary">Lock (disable power saving)</button>
+          <button id="unlock-btn" class="ghost">Unlock (restore stock)</button>
+        </div>
+        <p id="lock-status" class="status muted"></p>
+      </div>
+      <div class="card"><h3>Activity log</h3><pre id="smu-log" class="log"></pre></div>
+    </section>
+
+    <!-- =========================== ESCAPE =========================== -->
+    <section id="tab-escape" class="panel" role="tabpanel">
+      <div class="card">
+        <h3>D3DKMTEscape OD8 <span class="help-anchor" data-help="escape"></span></h3>
+        <p class="muted">
+          An alternate path that sends OD settings through the WDDM
+          D3DKMTEscape interface &mdash; the same channel AMD Adrenalin uses, and
+          it does <b>not</b> require Administrator. Leave a field 0 to skip it.
+        </p>
+        <div class="row">
+          <label for="esc-clock">Clock ceiling (MHz)</label>
+          <input type="number" id="esc-clock" min="0" max="5000" step="5" value="0" />
+          <label for="esc-power">Power (W)</label>
+          <input type="number" id="esc-power" min="0" max="600" step="1" value="0" />
+          <label for="esc-offset">GFX offset (MHz)</label>
+          <input type="number" id="esc-offset" min="-1000" max="1000" step="5" value="0" />
+          <button id="esc-btn" class="primary">Apply via Escape</button>
+        </div>
+        <p id="esc-status" class="status muted"></p>
+      </div>
+      <div class="card"><h3>Activity log</h3><pre id="esc-log" class="log"></pre></div>
+    </section>
+
+    <!-- =========================== SYSTEM =========================== -->
+    <section id="tab-system" class="panel" role="tabpanel">
+      <div class="card">
+        <h2>System &mdash; persistent tweaks <span class="help-anchor" data-help="registry"></span></h2>
+        <p class="warn">
+          &#9888; Unlike everything else in Adrenalift, these registry tweaks
+          <b>survive a reboot</b>. A backup is taken before the first apply;
+          use <b>Restore</b> (or a clean server shutdown, which auto-restores)
+          to revert. A hard crash or power loss will not auto-revert.
+        </p>
+        <div class="row">
+          <button id="reg-read-btn" class="primary">Read registry status</button>
+          <button id="reg-apply-btn">Apply recommended</button>
+          <button id="reg-restore-btn" class="ghost">Restore from backup</button>
+        </div>
+        <div id="reg-result" class="result"></div>
+        <p id="reg-status" class="status muted"></p>
+      </div>
+      <div class="card"><h3>Activity log</h3><pre id="reg-log" class="log"></pre></div>
     </section>
 
     <!-- ============================ HELP ============================ -->

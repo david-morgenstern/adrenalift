@@ -76,6 +76,14 @@ ERROR_MESSAGES: Dict[str, str] = {
         "The firmware rejected the OverDrive change. The value may be outside "
         "the range your card accepts. See the server console for details."
     ),
+    "pp_failed": (
+        "Could not patch the PowerPlay-table field in memory. Re-run a Scan and "
+        "try again. See the server console for details."
+    ),
+    "escape_failed": (
+        "The D3DKMTEscape OD8 write was rejected by the driver. See the server "
+        "console for details."
+    ),
     "generic": "The requested hardware action could not be completed.",
 }
 
@@ -612,6 +620,500 @@ def apply_od_ppt(
                     engine.cleanup_hardware(hw)
                 except Exception:  # noqa: BLE001
                     pass
+
+
+# ---------------------------------------------------------------------------
+# OverDrive table -- full per-field editor (mirrors src/app/tab_od.py)
+# ---------------------------------------------------------------------------
+
+# Each scalar field: (key/attr, group, unit, feature-bit constant name, label).
+# Array fields are expanded per-index at runtime.  Bit names are resolved against
+# src.engine.od_table so we don't hard-code their numeric values here.
+_OD_SCALAR_FIELDS = [
+    ("GfxclkFoffset", "Frequency", "MHz", "PP_OD_FEATURE_GFXCLK_BIT", "GFX clock offset"),
+    ("UclkFmin", "Frequency", "MHz", "PP_OD_FEATURE_UCLK_BIT", "Memory (UCLK) min"),
+    ("UclkFmax", "Frequency", "MHz", "PP_OD_FEATURE_UCLK_BIT", "Memory (UCLK) max"),
+    ("FclkFmin", "Frequency", "MHz", "PP_OD_FEATURE_FCLK_BIT", "Fabric (FCLK) min"),
+    ("FclkFmax", "Frequency", "MHz", "PP_OD_FEATURE_FCLK_BIT", "Fabric (FCLK) max"),
+    ("Ppt", "Power", "%", "PP_OD_FEATURE_PPT_BIT", "Power limit (PPT) %"),
+    ("Tdc", "Power", "%", "PP_OD_FEATURE_TDC_BIT", "Current limit (TDC) %"),
+    ("GfxEdc", "Power", "", "PP_OD_FEATURE_EDC_BIT", "GFX EDC"),
+    ("GfxPccLimitControl", "Power", "", "PP_OD_FEATURE_EDC_BIT", "GFX PCC limit"),
+    ("VddGfxVmax", "Voltage", "mV", "PP_OD_FEATURE_GFX_VMAX_BIT", "VddGfx Vmax"),
+    ("VddSocVmax", "Voltage", "mV", "PP_OD_FEATURE_SOC_VMAX_BIT", "VddSoc Vmax"),
+    ("GfxclkFmaxVmax", "Voltage", "MHz", "PP_OD_FEATURE_GFX_VMAX_BIT", "GFX clock Fmax@Vmax"),
+    ("MaxOpTemp", "Limits", "C", "PP_OD_FEATURE_TEMPERATURE_BIT", "Max operating temp"),
+    ("FanTargetTemperature", "Fan", "C", "PP_OD_FEATURE_FAN_CURVE_BIT", "Fan target temp"),
+    ("FanMinimumPwm", "Fan", "", "PP_OD_FEATURE_FAN_CURVE_BIT", "Fan minimum PWM"),
+    ("AcousticTargetRpmThreshold", "Fan", "RPM", "PP_OD_FEATURE_FAN_CURVE_BIT", "Acoustic target RPM"),
+    ("AcousticLimitRpmThreshold", "Fan", "RPM", "PP_OD_FEATURE_FAN_CURVE_BIT", "Acoustic limit RPM"),
+    ("FanMode", "Fan", "", "PP_OD_FEATURE_FAN_CURVE_BIT", "Fan mode (0=auto)"),
+    ("FanZeroRpmEnable", "Fan", "", "PP_OD_FEATURE_ZERO_FAN_BIT", "Fan zero-RPM enable"),
+    ("FanZeroRpmStopTemp", "Fan", "C", "PP_OD_FEATURE_ZERO_FAN_BIT", "Fan zero-RPM stop temp"),
+]
+
+# Array fields: (attr, group, unit, bit-name, label-prefix, count-constant-name).
+_OD_ARRAY_FIELDS = [
+    ("VoltageOffsetPerZoneBoundary", "Voltage", "mV", "PP_OD_FEATURE_GFX_VF_CURVE_BIT",
+     "V/F zone", "PP_NUM_OD_VF_CURVE_POINTS"),
+    ("FanLinearPwmPoints", "Fan", "", "PP_OD_FEATURE_FAN_CURVE_BIT",
+     "Fan PWM point", "NUM_OD_FAN_MAX_POINTS"),
+    ("FanLinearTempPoints", "Fan", "C", "PP_OD_FEATURE_FAN_CURVE_BIT",
+     "Fan temp point", "NUM_OD_FAN_MAX_POINTS"),
+]
+
+
+def _od_specs(od_table):
+    """Build the full OD field spec list, expanding arrays per index."""
+    specs = []
+    for attr, group, unit, bit, label in _OD_SCALAR_FIELDS:
+        if hasattr(od_table.OverDriveTable_t, attr):
+            specs.append({"key": attr, "attr": attr, "index": None, "group": group,
+                          "unit": unit, "bit": bit, "label": label})
+    for attr, group, unit, bit, prefix, count_name in _OD_ARRAY_FIELDS:
+        count = getattr(od_table, count_name, 0)
+        for i in range(count):
+            specs.append({"key": f"{attr}_{i}", "attr": attr, "index": i, "group": group,
+                          "unit": unit, "bit": bit, "label": f"{prefix} {i}"})
+    return specs
+
+
+def od_field_layout() -> List[Dict[str, Any]]:
+    """Return the OD field spec (no hardware needed) for the UI to render."""
+    try:
+        from src.engine import od_table
+    except Exception:  # noqa: BLE001
+        return []
+    return [
+        {"key": s["key"], "label": s["label"], "unit": s["unit"], "group": s["group"]}
+        for s in _od_specs(od_table)
+    ]
+
+
+def read_od_fields() -> Dict[str, Any]:
+    """Read the live OverDrive table and return current values per field."""
+    engine = _import_engine()
+    from src.engine import od_table
+    with _hw_lock:
+        hw = None
+        try:
+            try:
+                hw = _require_dma(engine)
+            except HardwareUnavailable:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("init_hardware failed: %s", exc)
+                raise HardwareUnavailable(
+                    ERROR_MESSAGES["init_failed"], code="init_failed"
+                ) from exc
+            od = engine.read_od(hw["smu"], hw["virt"])
+            if od is None:
+                raise HardwareUnavailable(ERROR_MESSAGES["od_failed"], code="od_failed")
+            values = {}
+            for s in _od_specs(od_table):
+                try:
+                    if s["index"] is None:
+                        values[s["key"]] = int(getattr(od, s["attr"]))
+                    else:
+                        values[s["key"]] = int(getattr(od, s["attr"])[s["index"]])
+                except Exception:  # noqa: BLE001
+                    values[s["key"]] = None
+            return {"ok": True, "values": values}
+        finally:
+            if hw:
+                try:
+                    engine.cleanup_hardware(hw)
+                except Exception:  # noqa: BLE001
+                    pass
+
+
+def apply_od_field(
+    key: str,
+    value: int,
+    *,
+    progress: ProgressFn = _noop_progress,
+    log: LogFn = _noop_log,
+) -> Dict[str, Any]:
+    """Set a single OverDrive table field by key. Requires a deep scan."""
+    engine = _import_engine()
+    from src.engine import od_table
+    spec = next((s for s in _od_specs(od_table) if s["key"] == key), None)
+    if spec is None:
+        raise ValueError("Unknown OD field.")
+    try:
+        value = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("OD value must be a whole number.") from exc
+    bit = getattr(od_table, spec["bit"])
+
+    with _hw_lock:
+        hw = None
+        try:
+            try:
+                hw = _require_dma(engine)
+            except HardwareUnavailable:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("init_hardware failed: %s", exc)
+                raise HardwareUnavailable(
+                    ERROR_MESSAGES["init_failed"], code="init_failed"
+                ) from exc
+
+            progress(40, f"Setting {spec['label']} = {value}…")
+
+            def _modify(od):
+                od.FeatureCtrlMask |= (1 << bit)
+                if spec["index"] is None:
+                    setattr(od, spec["attr"], value)
+                else:
+                    getattr(od, spec["attr"])[spec["index"]] = value
+
+            ok, err = engine.apply_od_single_field(hw["smu"], hw["virt"], _modify)
+            if not ok:
+                _log.warning("apply OD field %s failed: %s", key, err)
+                raise HardwareUnavailable(ERROR_MESSAGES["od_failed"], code="od_failed")
+            progress(100, "Applied.")
+            msg = f"OverDrive: {spec['label']} set to {value}{(' ' + spec['unit']) if spec['unit'] else ''}."
+            log(msg)
+            return {"ok": True, "key": key, "value": value, "message": msg}
+        finally:
+            if hw:
+                try:
+                    engine.cleanup_hardware(hw)
+                except Exception:  # noqa: BLE001
+                    pass
+
+
+# ---------------------------------------------------------------------------
+# PowerPlay table -- full field editor (mirrors src/app/tab_pp.py)
+# ---------------------------------------------------------------------------
+
+def _flatten_pp_tree(node, prefix, baseclock_off, out):
+    """Walk the decoded PP tree, collecting editable leaves (value+offset)."""
+    if isinstance(node, dict):
+        if "value" in node and "offset" in node:
+            try:
+                raw_off = int(node.get("offset", -1))
+            except (TypeError, ValueError):
+                raw_off = -1
+            if raw_off >= 0:
+                out.append({
+                    "path": prefix,
+                    "offset": raw_off - baseclock_off,
+                    "type": str(node.get("type", "H")),
+                    "vbios_value": node.get("value"),
+                })
+            return
+        for k, child in node.items():
+            child_path = f"{prefix}.{k}" if prefix else str(k)
+            _flatten_pp_tree(child, child_path, baseclock_off, out)
+    elif isinstance(node, (list, tuple)):
+        for i, child in enumerate(node):
+            _flatten_pp_tree(child, f"{prefix}[{i}]", baseclock_off, out)
+
+
+def pp_field_layout() -> Dict[str, Any]:
+    """Decode the VBIOS PP table into a flat, editable field list."""
+    try:
+        from src.app.constants import DEFAULT_VBIOS_PATH
+        from src.io.vbios_storage import read_vbios_decoded
+        from src.io.vbios_parser import decode_pp_table_full
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("PP decode imports failed: %s", exc)
+        return {"available": False, "reason": "PP decoding is unavailable.", "fields": []}
+
+    rom_bytes, _ = read_vbios_decoded(DEFAULT_VBIOS_PATH)
+    if not rom_bytes:
+        return {
+            "available": False,
+            "reason": "A VBIOS ROM (bios/vbios.rom) is required to edit PP-table fields.",
+            "fields": [],
+        }
+    decoded = decode_pp_table_full(rom_bytes, rom_path=DEFAULT_VBIOS_PATH)
+    if decoded is None or getattr(decoded, "data", None) is None:
+        return {"available": False, "reason": "Could not decode the PP table.", "fields": []}
+
+    vbios = _get_vbios_values_or_defaults_quiet()
+    baseclock_off = int(getattr(vbios, "baseclock_pp_offset", 0) or 0) if vbios else 0
+    fields: List[Dict[str, Any]] = []
+    _flatten_pp_tree(decoded.data, "", baseclock_off, fields)
+    return {"available": True, "fields": fields}
+
+
+def _get_vbios_values_or_defaults_quiet():
+    try:
+        return _get_vbios_values_or_defaults()
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def apply_pp_field(
+    offset: int,
+    value,
+    type_code: str = "H",
+    *,
+    progress: ProgressFn = _noop_progress,
+    log: LogFn = _noop_log,
+) -> Dict[str, Any]:
+    """Patch a single PP-table field across all scanned RAM copies.
+
+    Requires a prior successful scan (the volatile RAM PP-table addresses).
+    """
+    engine = _import_engine()
+    scan_result = _get_cached_result()
+    if not (scan_result and getattr(scan_result, "valid_addrs", None)):
+        raise HardwareUnavailable(ERROR_MESSAGES["no_scan"], code="no_scan")
+
+    with _hw_lock:
+        hw = None
+        try:
+            try:
+                hw = engine.init_hardware(skip_dma_discovery=True)
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("init_hardware failed: %s", exc)
+                raise HardwareUnavailable(
+                    ERROR_MESSAGES["init_failed"], code="init_failed"
+                ) from exc
+            progress(40, f"Patching PP field @0x{int(offset):X}…")
+            res = engine.patch_pp_single_field(
+                hw["inpout"], scan_result, int(offset), value, str(type_code)
+            )
+            if not res.get("ok"):
+                raise HardwareUnavailable(ERROR_MESSAGES["pp_failed"], code="pp_failed")
+            progress(100, "Patched.")
+            msg = (
+                f"PP field @0x{int(offset):X} set to {value} "
+                f"({res.get('writes', 0)}/{res.get('addrs', 0)} copies)."
+            )
+            log(msg)
+            return {"ok": True, "offset": int(offset), "value": value,
+                    "writes": res.get("writes", 0), "message": msg}
+        finally:
+            if hw:
+                try:
+                    engine.cleanup_hardware(hw)
+                except Exception:  # noqa: BLE001
+                    pass
+
+
+# ---------------------------------------------------------------------------
+# SMU controls -- GFX clock limits, power-saving lock (all DMA-free)
+# ---------------------------------------------------------------------------
+
+def apply_freq_limits(
+    gfx_min: int = 0,
+    gfx_max: int = 0,
+    *,
+    progress: ProgressFn = _noop_progress,
+    log: LogFn = _noop_log,
+) -> Dict[str, Any]:
+    """Set the GFX clock soft/hard min and/or max (MHz) via the SMU. DMA-free."""
+    engine = _import_engine()
+    gfx_min = int(gfx_min or 0)
+    gfx_max = int(gfx_max or 0)
+    if gfx_min and not (200 <= gfx_min <= 4000):
+        raise ValueError("GFX min must be between 200 and 4000 MHz.")
+    if gfx_max and not (200 <= gfx_max <= 4000):
+        raise ValueError("GFX max must be between 200 and 4000 MHz.")
+    if gfx_min and gfx_max and gfx_min > gfx_max:
+        raise ValueError("GFX min cannot exceed GFX max.")
+
+    with _hw_lock:
+        hw = None
+        try:
+            try:
+                hw = engine.init_hardware(skip_dma_discovery=True)
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("init_hardware failed: %s", exc)
+                raise HardwareUnavailable(
+                    ERROR_MESSAGES["init_failed"], code="init_failed"
+                ) from exc
+            smu = hw["smu"]
+            gfx = engine.PPCLK.GFXCLK & 0xFFFF
+            done = []
+            if gfx_max:
+                p = (gfx << 16) | (gfx_max & 0xFFFF)
+                smu.send_msg(engine.PPSMC.SetSoftMaxByFreq, p)
+                smu.send_msg(engine.PPSMC.SetHardMaxByFreq, p)
+                done.append(f"max={gfx_max} MHz")
+            if gfx_min:
+                p = (gfx << 16) | (gfx_min & 0xFFFF)
+                smu.send_msg(engine.PPSMC.SetSoftMinByFreq, p)
+                smu.send_msg(engine.PPSMC.SetHardMinByFreq, p)
+                done.append(f"min={gfx_min} MHz")
+            if not done:
+                return {"ok": True, "message": "No GFX clock limits changed."}
+            progress(100, "Applied.")
+            msg = "GFX clock limits set: " + ", ".join(done) + "."
+            log(msg)
+            return {"ok": True, "gfx_min": gfx_min, "gfx_max": gfx_max, "message": msg}
+        finally:
+            if hw:
+                try:
+                    engine.cleanup_hardware(hw)
+                except Exception:  # noqa: BLE001
+                    pass
+
+
+def apply_power_saving_lock(
+    lock: bool = True,
+    *,
+    progress: ProgressFn = _noop_progress,
+    log: LogFn = _noop_log,
+) -> Dict[str, Any]:
+    """Disable (lock) or re-allow the GFX power-saving features that cause
+    clock-gating/idle downclock (DS_GFXCLK, GFX_ULV, GFXOFF). DMA-free."""
+    engine = _import_engine()
+    with _hw_lock:
+        hw = None
+        try:
+            try:
+                hw = engine.init_hardware(skip_dma_discovery=True)
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("init_hardware failed: %s", exc)
+                raise HardwareUnavailable(
+                    ERROR_MESSAGES["init_failed"], code="init_failed"
+                ) from exc
+            smu = hw["smu"]
+            feat_mask = ((1 << engine.SMU_FEATURE.DS_GFXCLK) |
+                         (1 << engine.SMU_FEATURE.GFX_ULV) |
+                         (1 << engine.SMU_FEATURE.GFXOFF))
+            if lock:
+                smu.send_msg(engine.PPSMC.DisallowGfxOff)
+                smu.send_msg(engine.PPSMC.DisableSmuFeaturesLow, feat_mask)
+                msg = "Power-saving features locked (DS_GFXCLK / GFX_ULV / GFXOFF disabled)."
+            else:
+                smu.send_msg(engine.PPSMC.EnableSmuFeaturesLow, feat_mask)
+                smu.send_msg(engine.PPSMC.AllowGfxOff)
+                msg = "Power-saving features re-enabled (back to stock idle behaviour)."
+            progress(100, "Applied.")
+            log(msg)
+            return {"ok": True, "locked": bool(lock), "message": msg}
+        finally:
+            if hw:
+                try:
+                    engine.cleanup_hardware(hw)
+                except Exception:  # noqa: BLE001
+                    pass
+
+
+# ---------------------------------------------------------------------------
+# D3DKMTEscape OD8 path (no admin) -- mirrors src/app/tab_escape.py
+# ---------------------------------------------------------------------------
+
+def apply_escape(
+    clock_mhz: int = 0,
+    power_w: int = 0,
+    gfx_offset_mhz: int = 0,
+    *,
+    progress: ProgressFn = _noop_progress,
+    log: LogFn = _noop_log,
+) -> Dict[str, Any]:
+    """Apply OD settings through the D3DKMTEscape path (no admin required).
+
+    Only the high-level knobs that map cleanly to OD8 entries are exposed
+    (clock ceiling, power limit, GFX offset); fields left at 0 are unchanged.
+    """
+    engine = _import_engine()
+    clock_mhz = int(clock_mhz or 0)
+    power_w = int(power_w or 0)
+    gfx_offset_mhz = int(gfx_offset_mhz or 0)
+    if not (clock_mhz or power_w or gfx_offset_mhz):
+        raise ValueError("Set at least one of clock, power, or GFX offset.")
+
+    settings = engine.OverclockSettings(
+        clock=clock_mhz or 0,
+        power=power_w or 0,
+        offset=gfx_offset_mhz or 0,
+        od_ppt=0,
+        od_tdc=0,
+    )
+    progress(40, "Sending OD8 settings via D3DKMTEscape…")
+    result = engine.apply_od_via_escape(settings)
+    if not result.get("ok"):
+        _log.warning("escape apply failed: %s", result.get("error"))
+        raise HardwareUnavailable(ERROR_MESSAGES["escape_failed"], code="escape_failed")
+    progress(100, "Applied.")
+    changed = result.get("changed_indices", [])
+    msg = f"Escape OD8 applied ({len(changed)} value(s) changed)."
+    log(msg)
+    return {
+        "ok": True,
+        "changed_indices": list(changed),
+        "verified": _jsonable(result.get("verified", {}) or {}),
+        "message": msg,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Profile apply -- orchestrates the volatile sections in dependency order
+# ---------------------------------------------------------------------------
+
+def apply_profile(
+    settings: Dict[str, Any],
+    *,
+    progress: ProgressFn = _noop_progress,
+    log: LogFn = _noop_log,
+) -> Dict[str, Any]:
+    """Apply a saved profile's volatile sections in a safe order.
+
+    Reuses the public single-action functions (each manages its own hardware
+    handle + lock), so this never holds the hardware lock itself.  Registry
+    settings are never part of a profile, so nothing here is persistent.
+    """
+    settings = settings or {}
+    needs_dma = any(k in settings for k in ("gfx_offset_mhz", "od_ppt_pct", "od_fields"))
+    needs_scan = needs_dma or any(k in settings for k in ("boost_clock_mhz", "pp_fields"))
+
+    results: List[Dict[str, Any]] = []
+
+    def _step(name, fn):
+        try:
+            r = fn()
+            results.append({"step": name, "ok": True, "message": r.get("message", "done")})
+            log(f"[{name}] {r.get('message', 'done')}")
+        except Exception as exc:  # noqa: BLE001 - per-step, keep going
+            detail = safe_message(exc) if isinstance(exc, HardwareUnavailable) else str(exc)
+            results.append({"step": name, "ok": False, "message": detail})
+            log(f"[{name}] FAILED: {detail}")
+
+    # 1) Scan if needed and not already cached.
+    if needs_scan and _get_cached_result() is None:
+        progress(5, "Scanning memory for the profile…")
+        _step("scan", lambda: run_scan(deep_scan=needs_dma, progress=progress, log=log))
+
+    # 2) Apply sections (order: power -> clocks/pp -> OD -> features).
+    if "power_limit_w" in settings:
+        progress(30, "Power limit…")
+        _step("power_limit", lambda: set_power_limit(settings["power_limit_w"], progress=progress, log=log))
+    if "boost_clock_mhz" in settings:
+        progress(45, "Boost clock…")
+        _step("boost_clock", lambda: apply_boost_clock(settings["boost_clock_mhz"], progress=progress, log=log))
+    for off, spec in (settings.get("pp_fields") or {}).items():
+        _step(f"pp@{off}", lambda off=off, spec=spec: apply_pp_field(
+            int(off), spec.get("value"), spec.get("type", "H"), progress=progress, log=log))
+    if "gfx_offset_mhz" in settings:
+        progress(65, "GFX offset…")
+        _step("gfx_offset", lambda: apply_gfx_offset(settings["gfx_offset_mhz"], progress=progress, log=log))
+    if "od_ppt_pct" in settings:
+        progress(75, "OD PPT…")
+        _step("od_ppt", lambda: apply_od_ppt(settings["od_ppt_pct"], progress=progress, log=log))
+    for key, val in (settings.get("od_fields") or {}).items():
+        _step(f"od.{key}", lambda key=key, val=val: apply_od_field(key, val, progress=progress, log=log))
+    fl = settings.get("freq_limits") or {}
+    if fl.get("gfx_min") or fl.get("gfx_max"):
+        progress(85, "GFX clock limits…")
+        _step("freq_limits", lambda: apply_freq_limits(
+            fl.get("gfx_min", 0), fl.get("gfx_max", 0), progress=progress, log=log))
+
+    ok = all(r["ok"] for r in results) if results else False
+    applied = sum(1 for r in results if r["ok"])
+    progress(100, "Profile applied.")
+    return {
+        "ok": ok,
+        "steps": results,
+        "message": f"Profile applied: {applied}/{len(results)} step(s) succeeded.",
+    }
 
 
 # ---------------------------------------------------------------------------
