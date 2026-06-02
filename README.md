@@ -57,6 +57,49 @@ Because the patch lives only in RAM, it is inherently safe to revert — just re
 
 ---
 
+## Web server (browser front-end)
+
+Adrenalift can also run as a **local web server** instead of the desktop GUI.
+This is handy for headless setups, remote access over your LAN, or simply if
+you prefer a browser. It shares the same overclock engine as the desktop app
+and adds an extended, beginner-friendly help and tooltip system so regular
+users can navigate the controls more easily.
+
+```powershell
+# from a source checkout, after `pip install -r requirements.txt`
+python -m src.web
+# or use the helper launcher on Windows:
+.\web.bat
+```
+
+Then open <http://127.0.0.1:8770> in your browser.
+
+- **Boost Clock** tab — Scan memory, then choose a boost clock and Apply
+  (the same Simple-tab workflow as the desktop app).
+- **Status** tab — read live SMU state, power limit, and DPM clock ranges.
+- **Metrics** tab — live GPU sensor readout (clocks, power, temps, fan, …).
+- **Help** tab — the full set of in-app guides; every control also has a
+  `?` button with a short tip and a plain-language description.
+
+Options:
+
+```text
+python -m src.web --host 0.0.0.0 --port 8770   # expose on the LAN
+```
+
+> The hardware actions (scan/apply/status/metrics) require **Windows** with the
+> AMD driver, the bundled kernel drivers, and **Administrator** privileges —
+> the same as the desktop app. On other platforms (or without elevation) the
+> server still starts and the UI and help remain fully browsable; hardware
+> actions return a clear "engine unavailable" message instead of failing
+> silently.
+>
+> By default the server binds to `127.0.0.1` (localhost only). Only use
+> `--host 0.0.0.0` on a trusted network: anyone who can reach the port can
+> drive the overclock controls.
+
+---
+
 ## Building from Source
 
 ### Prerequisites
@@ -142,6 +185,13 @@ src/
 │   ├── workers.py       # QThread workers (scan, apply, metrics, etc.)
 │   ├── settings.py      # Persistent settings (settings.json)
 │   └── ...
+├── web/                 # Browser front-end (Flask), shares the engine
+│   ├── server.py        # Flask app, REST API, entry point (python -m src.web)
+│   ├── hardware_service.py  # Qt-free engine wrapper (scan/apply/status/metrics)
+│   ├── jobs.py          # Background job manager (progress + log streaming)
+│   ├── tooltips.py      # Extended beginner-friendly tips & help pages
+│   ├── templates/       # index.html
+│   └── static/          # app.js, style.css
 ├── engine/              # Core overclock logic
 │   ├── overclock_engine.py   # Scan, patch, apply, verify, watchdog
 │   ├── od_table.py           # OverDrive table structures & controller

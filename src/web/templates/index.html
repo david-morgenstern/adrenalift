@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Adrenalift</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">Adrenalift</span>
+      <span class="tagline">AMD GPU boost-clock unlock &mdash; web console</span>
+    </div>
+    <div class="version">v{{ app_version }} &middot; build {{ app_build }}</div>
+  </header>
+
+  <div id="banner" class="banner hidden"></div>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="home" role="tab">Boost Clock</button>
+    <button class="tab" data-tab="status" role="tab">Status</button>
+    <button class="tab" data-tab="metrics" role="tab">Metrics</button>
+    <button class="tab" data-tab="help" role="tab">Help</button>
+  </nav>
+
+  <main>
+    <!-- ============================ HOME ============================ -->
+    <section id="tab-home" class="panel active" role="tabpanel">
+      <div class="card intro">
+        <h2>Unlock your boost clock <span class="help-anchor" data-help="workflow"></span></h2>
+        <p id="vbios-line" class="muted">Reading VBIOS&hellip;</p>
+      </div>
+
+      <div class="card">
+        <h3>Step 1 &mdash; Scan memory <span class="help-anchor" data-help="scan"></span></h3>
+        <div class="row">
+          <label for="workers">Scan workers
+            <span class="help-anchor" data-help="scan_workers"></span>
+          </label>
+          <input type="number" id="workers" min="1" max="32" value="4" />
+          <button id="scan-btn" class="primary">Scan</button>
+        </div>
+        <div class="progress hidden" id="scan-progress-wrap">
+          <div class="progress-bar"><div id="scan-progress" class="progress-fill"></div></div>
+          <span id="scan-progress-label" class="muted"></span>
+        </div>
+        <p id="scan-status" class="status muted">Press Scan to begin.</p>
+      </div>
+
+      <div class="card">
+        <h3>Step 2 &mdash; Choose &amp; apply a boost clock
+          <span class="help-anchor" data-help="boost_clock"></span>
+        </h3>
+        <div class="row">
+          <label for="clock">Boost clock (MHz)</label>
+          <input type="number" id="clock" min="500" max="5000" step="5" value="3500" />
+          <button id="apply-btn" class="primary" disabled>Apply
+            <span class="help-anchor light" data-help="apply_simple"></span>
+          </button>
+        </div>
+        <p class="warn">
+          &#9888; Start just above stock and test for stability. Changes live in
+          RAM only and are undone by a reboot. Use at your own risk.
+        </p>
+        <div class="progress hidden" id="apply-progress-wrap">
+          <div class="progress-bar"><div id="apply-progress" class="progress-fill"></div></div>
+          <span id="apply-progress-label" class="muted"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Activity log</h3>
+        <pre id="log" class="log"></pre>
+      </div>
+    </section>
+
+    <!-- ============================ STATUS ============================ -->
+    <section id="tab-status" class="panel" role="tabpanel">
+      <div class="card">
+        <h3>GPU firmware status
+          <span class="help-anchor" data-help="status"></span>
+        </h3>
+        <button id="status-btn" class="primary">Read status</button>
+        <div id="status-result" class="result"></div>
+      </div>
+    </section>
+
+    <!-- ============================ METRICS ============================ -->
+    <section id="tab-metrics" class="panel" role="tabpanel">
+      <div class="card">
+        <h3>Live metrics
+          <span class="help-anchor" data-help="metrics"></span>
+        </h3>
+        <div class="row">
+          <button id="metrics-btn" class="primary">Read metrics</button>
+          <label class="checkbox">
+            <input type="checkbox" id="metrics-auto" />
+            Auto-refresh
+            <span class="help-anchor" data-help="metrics_auto"></span>
+          </label>
+        </div>
+        <div id="metrics-result" class="result"></div>
+      </div>
+    </section>
+
+    <!-- ============================ HELP ============================ -->
+    <section id="tab-help" class="panel" role="tabpanel">
+      <div class="help-layout">
+        <aside class="help-nav">
+          <h3>Guides</h3>
+          <ul id="help-list"></ul>
+        </aside>
+        <article id="help-body" class="card help-body">
+          <p class="muted">Select a guide on the left.</p>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <!-- Tooltip / description popover -->
+  <div id="popover" class="popover hidden">
+    <button class="popover-close" aria-label="Close">&times;</button>
+    <div class="popover-body"></div>
+  </div>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
