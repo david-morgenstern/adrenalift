@@ -686,17 +686,42 @@ async function ppLoadAndRender() {
     box.innerHTML = '<p class="muted">No editable PP fields found.</p>';
     return;
   }
-  let html = `<p class="muted">${d.fields.length} fields. Editing patches RAM (needs a Scan).</p><table class="editor">`;
+  const tunable = d.fields.filter((f) => f.editable).length;
+  let html =
+    `<p class="muted">${d.fields.length} fields total · ${tunable} editable. ` +
+    `Editing patches RAM across all scanned copies (needs a Scan). A reboot restores stock.</p>` +
+    `<table class="editor">`;
   d.fields.forEach((f) => {
     const v = f.vbios_value == null ? 0 : f.vbios_value;
+    const ro = !f.editable;
+    const desc = escapeHtml(f.description || "");
+    const hint = escapeHtml(f.input_hint || "");
     html +=
-      `<tr data-row="${escapeHtml(f.path)}"><th>${escapeHtml(f.path)}</th>` +
-      `<td class="cur">VBIOS: ${escapeHtml(v)} <span class="muted">(${escapeHtml(f.type)})</span></td>` +
-      `<td><input type="number" class="pp-input" value="${escapeHtml(v)}" /></td>` +
-      `<td><button class="set-btn pp-set" data-offset="${f.offset}" data-type="${escapeHtml(f.type)}">Set</button></td></tr>`;
+      `<tr data-row="${escapeHtml(f.path)}" data-editable="${f.editable ? 1 : 0}">` +
+      `<th title="${desc}">${escapeHtml(f.path)}` +
+      (ro ? ' <span class="tag-ro">read-only</span>' : "") +
+      `<span class="field-hint">${hint}</span></th>` +
+      `<td class="cur">VBIOS: ${escapeHtml(v)} <span class="muted">(${escapeHtml(f.type_label || f.type)})</span></td>` +
+      `<td><input type="number" class="pp-input" value="${escapeHtml(v)}" ${ro ? "disabled" : ""} /></td>` +
+      `<td>${
+        ro
+          ? '<span class="muted">—</span>'
+          : `<button class="set-btn pp-set" data-offset="${f.offset}" data-type="${escapeHtml(f.type)}">Set</button>`
+      }</td></tr>`;
   });
   html += "</table>";
   box.innerHTML = html;
+  applyPpVisibility();
+}
+
+function applyPpVisibility() {
+  const tunableOnly = $("#pp-tunable-only") && $("#pp-tunable-only").checked;
+  const term = ($("#pp-filter").value || "").toLowerCase();
+  $$("#pp-result tr[data-row]").forEach((tr) => {
+    const matchText = tr.dataset.row.toLowerCase().includes(term);
+    const matchTun = !tunableOnly || tr.dataset.editable === "1";
+    tr.style.display = matchText && matchTun ? "" : "none";
+  });
 }
 
 function wirePowerplay() {
@@ -704,7 +729,8 @@ function wirePowerplay() {
     $("#pp-read-btn").disabled = true;
     ppLoadAndRender().finally(() => ($("#pp-read-btn").disabled = false));
   });
-  $("#pp-filter").addEventListener("input", (e) => filterRows("#pp-result", e.target.value));
+  $("#pp-filter").addEventListener("input", applyPpVisibility);
+  $("#pp-tunable-only").addEventListener("change", applyPpVisibility);
   $("#pp-result").addEventListener("click", (e) => {
     const btn = e.target.closest(".pp-set");
     if (!btn) return;
