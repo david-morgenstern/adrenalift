@@ -180,7 +180,15 @@ table.editor th, table.editor td {
 table.editor th { color: var(--text); font-weight: 500; width: 40%; word-break: break-all; }
 table.editor td.cur { color: var(--muted); width: 28%; }
 table.editor input { width: 110px; padding: 4px 6px; }
+table.editor input:disabled { opacity: 0.5; }
 table.editor button.set-btn { padding: 4px 12px; font-size: 12px; }
+table.editor th { cursor: help; }
+.field-hint { display: block; color: var(--muted); font-size: 11px; font-weight: 400; margin-top: 2px; }
+.tag-ro {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  color: var(--muted); border: 1px solid var(--border); border-radius: 4px;
+  padding: 0 5px; margin-left: 6px; vertical-align: middle;
+}
 .result { max-height: 60vh; overflow: auto; }
 input[type="search"] { flex: 1; min-width: 140px; }
 

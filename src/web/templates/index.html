@@ -247,7 +247,17 @@
         <div class="row">
           <button id="pp-read-btn" class="primary">Load PP fields</button>
           <input type="search" id="pp-filter" placeholder="Filter fields…" />
+          <label class="checkbox">
+            <input type="checkbox" id="pp-tunable-only" checked />
+            Hide structural / read-only fields
+          </label>
         </div>
+        <p class="muted">
+          Hover a field's name for what it means; the grey line under each input
+          tells you what a valid value looks like (a 0/1 flag, MHz, mV, °C, a
+          structural offset, …). Structural fields (table layout, sizes, ids,
+          like <code>pmfw_pptable_start_offset</code>) are read-only.
+        </p>
         <div id="pp-result" class="result"><p class="muted">Press “Load PP fields”.</p></div>
         <p id="pp-status" class="status muted"></p>
       </div>

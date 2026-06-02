@@ -75,6 +75,7 @@ a = Analysis(
         "src.web.tooltips",
         "src.web.profiles",
         "src.web.registry_service",
+        "src.web.pp_help",
         # The web layer reaches into a few app/engine modules:
         "src.app.constants",
         "src.app.settings",

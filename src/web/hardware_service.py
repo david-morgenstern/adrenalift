@@ -797,11 +797,18 @@ def _flatten_pp_tree(node, prefix, baseclock_off, out):
             except (TypeError, ValueError):
                 raw_off = -1
             if raw_off >= 0:
+                tcode = str(node.get("type", "H"))
+                from src.web import pp_help
+                info = pp_help.describe(prefix, tcode)
                 out.append({
                     "path": prefix,
                     "offset": raw_off - baseclock_off,
-                    "type": str(node.get("type", "H")),
+                    "type": tcode,
                     "vbios_value": node.get("value"),
+                    "description": info["description"],
+                    "input_hint": info["input_hint"],
+                    "editable": info["editable"],
+                    "type_label": info["type_label"],
                 })
             return
         for k, child in node.items():
