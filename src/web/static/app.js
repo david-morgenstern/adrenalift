@@ -135,7 +135,8 @@ $("#scan-btn").addEventListener("click", async () => {
   $("#scan-progress-wrap").classList.remove("hidden");
   setProgress("scan", 0, "");
   const workers = parseInt($("#workers").value, 10) || 0;
-  const { data } = await postJSON("/api/scan", { workers });
+  const deep = $("#deep-scan").checked;
+  const { data } = await postJSON("/api/scan", { workers, deep });
   if (!data.job_id) {
     $("#scan-status").textContent = data.error || "Could not start scan.";
     btn.disabled = false;
@@ -199,6 +200,113 @@ function setProgress(which, pct, msg) {
   $(`#${which}-progress`).style.width = (pct || 0) + "%";
   $(`#${which}-progress-label`).textContent = msg || "";
 }
+
+// ---------------------------------------------------------------------------
+// Performance tab (power limit, GFX offset, OD PPT) — all job-based
+// ---------------------------------------------------------------------------
+function perfLog(msg) {
+  const el = $("#perf-log");
+  el.textContent += (el.textContent ? "\n" : "") + msg;
+  el.scrollTop = el.scrollHeight;
+}
+
+// Generic "start a background apply job and track it" wired to the
+// Performance-tab controls. `progressKey` is optional (id prefix for a bar).
+async function runApplyJob({ url, body, btn, statusEl, busyMsg, progressKey }) {
+  const button = $(btn);
+  const status = $(statusEl);
+  button.disabled = true;
+  if (status) status.textContent = busyMsg;
+  if (progressKey) {
+    $(`#${progressKey}-progress-wrap`).classList.remove("hidden");
+    setProgress(progressKey, 0, "");
+  }
+  perfLog(busyMsg);
+  let resp;
+  try {
+    resp = await postJSON(url, body);
+  } catch (e) {
+    button.disabled = false;
+    if (status) status.textContent = "Network error.";
+    perfLog("Network error.");
+    return;
+  }
+  if (!resp.data.job_id) {
+    button.disabled = false;
+    const err = resp.data.error || "Could not start.";
+    if (status) status.textContent = err;
+    perfLog(err);
+    return;
+  }
+  pollJob(resp.data.job_id, {
+    onProgress: (pct, msg) => progressKey && setProgress(progressKey, pct, msg),
+    onLog: (l) => perfLog(l),
+    onDone: (result) => {
+      button.disabled = false;
+      if (progressKey) setProgress(progressKey, 100, "");
+      const m = (result && result.message) || "Done.";
+      if (status) status.textContent = m;
+      perfLog(m);
+    },
+    onError: (err) => {
+      button.disabled = false;
+      if (status) status.textContent = err;
+      perfLog("Failed: " + err);
+    },
+  });
+}
+
+$("#power-btn").addEventListener("click", () => {
+  const watts = parseInt($("#power-watts").value, 10);
+  if (!watts) {
+    perfLog("Enter a power limit in watts first.");
+    return;
+  }
+  runApplyJob({
+    url: "/api/apply/power_limit",
+    body: { watts },
+    btn: "#power-btn",
+    statusEl: "#power-status",
+    busyMsg: `Setting power limit to ${watts} W…`,
+    progressKey: "power",
+  });
+});
+
+$("#power-template-btn").addEventListener("click", () => {
+  $("#power-watts").value = 340;
+  $("#power-btn").click();
+});
+
+$("#gfx-offset-btn").addEventListener("click", () => {
+  const offset = parseInt($("#gfx-offset").value, 10);
+  if (Number.isNaN(offset)) {
+    perfLog("Enter a GFX offset in MHz first.");
+    return;
+  }
+  runApplyJob({
+    url: "/api/apply/gfx_offset",
+    body: { offset },
+    btn: "#gfx-offset-btn",
+    statusEl: "#gfx-offset-status",
+    busyMsg: `Applying GFX offset ${offset >= 0 ? "+" : ""}${offset} MHz…`,
+    progressKey: "gfxoff",
+  });
+});
+
+$("#od-ppt-btn").addEventListener("click", () => {
+  const pct = parseInt($("#od-ppt").value, 10);
+  if (Number.isNaN(pct)) {
+    perfLog("Enter an OD PPT percentage first.");
+    return;
+  }
+  runApplyJob({
+    url: "/api/apply/od_ppt",
+    body: { pct },
+    btn: "#od-ppt-btn",
+    statusEl: "#od-ppt-status",
+    busyMsg: `Applying OD PPT ${pct >= 0 ? "+" : ""}${pct}%…`,
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Status
@@ -366,7 +474,10 @@ async function init() {
     const state = await getJSON("/api/state");
     renderBanner(state);
     if (state.vbios) {
-      $("#vbios-line").textContent = state.vbios.summary || "";
+      const summary = state.vbios.summary || "";
+      $("#vbios-line").textContent = summary;
+      const pv = $("#perf-vbios-line");
+      if (pv) pv.textContent = summary;
     }
     if (state.last_scan && state.last_scan.ready_to_apply) {
       scanReady = true;

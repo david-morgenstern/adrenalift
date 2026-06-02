@@ -18,15 +18,90 @@
   <div id="banner" class="banner hidden"></div>
 
   <nav class="tabs" role="tablist">
-    <button class="tab active" data-tab="home" role="tab">Boost Clock</button>
+    <button class="tab active" data-tab="performance" role="tab">Performance</button>
+    <button class="tab" data-tab="home" role="tab">Boost Clock</button>
     <button class="tab" data-tab="status" role="tab">Status</button>
     <button class="tab" data-tab="metrics" role="tab">Metrics</button>
     <button class="tab" data-tab="help" role="tab">Help</button>
   </nav>
 
   <main>
+    <!-- ======================== PERFORMANCE ======================== -->
+    <section id="tab-performance" class="panel active" role="tabpanel">
+      <div class="card intro">
+        <h2>Performance <span class="help-anchor" data-help="performance"></span></h2>
+        <p class="muted">
+          The settings that actually move performance on RDNA4. Change one thing
+          at a time and test stability. Everything lives in RAM only &mdash; a
+          reboot restores stock values.
+        </p>
+        <p id="perf-vbios-line" class="muted"></p>
+      </div>
+
+      <div class="card">
+        <h3>Power limit <span class="help-anchor" data-help="power_limit"></span></h3>
+        <p class="muted">
+          The most reliable win: give the GPU a little more power budget so it
+          holds its boost clock longer. Works without a scan.
+        </p>
+        <div class="row">
+          <label for="power-watts">Power limit (W)</label>
+          <input type="number" id="power-watts" min="100" max="400" step="1" value="340" />
+          <button id="power-btn" class="primary">Apply power limit</button>
+          <button id="power-template-btn" class="ghost">Safe template (340&nbsp;W)
+            <span class="help-anchor" data-help="power_template"></span>
+          </button>
+        </div>
+        <div class="progress hidden" id="power-progress-wrap">
+          <div class="progress-bar"><div id="power-progress" class="progress-fill"></div></div>
+          <span id="power-progress-label" class="muted"></span>
+        </div>
+        <p id="power-status" class="status muted">Stock reference is ~330&nbsp;W; ~340&nbsp;W is a safe nudge.</p>
+      </div>
+
+      <div class="card">
+        <h3>GFX clock offset <span class="help-anchor" data-help="gfx_offset"></span></h3>
+        <p class="muted">
+          A fixed MHz shift on the graphics clock (OverDrive). Needs a
+          <b>deep scan</b> first (Boost Clock tab &rarr; tick the deep-scan box).
+        </p>
+        <div class="row">
+          <label for="gfx-offset">GFX offset (MHz)</label>
+          <input type="number" id="gfx-offset" min="-1000" max="1000" step="5" value="0" />
+          <button id="gfx-offset-btn" class="primary">Apply offset</button>
+        </div>
+        <div class="progress hidden" id="gfxoff-progress-wrap">
+          <div class="progress-bar"><div id="gfxoff-progress" class="progress-fill"></div></div>
+          <span id="gfxoff-progress-label" class="muted"></span>
+        </div>
+        <p id="gfx-offset-status" class="status muted">Start small (e.g. +25&ndash;50&nbsp;MHz).</p>
+      </div>
+
+      <details class="card">
+        <summary><b>Advanced:</b> OverDrive PPT (% over default)
+          <span class="help-anchor" data-help="od_ppt"></span>
+        </summary>
+        <p class="muted">
+          The percentage-based equivalent of the power limit above. Prefer the
+          absolute watt control unless you specifically want a percentage. Needs
+          a deep scan.
+        </p>
+        <div class="row">
+          <label for="od-ppt">OD PPT (%)</label>
+          <input type="number" id="od-ppt" min="-30" max="30" step="1" value="0" />
+          <button id="od-ppt-btn" class="primary">Apply OD PPT</button>
+        </div>
+        <p id="od-ppt-status" class="status muted"></p>
+      </details>
+
+      <div class="card">
+        <h3>Activity log</h3>
+        <pre id="perf-log" class="log"></pre>
+      </div>
+    </section>
+
     <!-- ============================ HOME ============================ -->
-    <section id="tab-home" class="panel active" role="tabpanel">
+    <section id="tab-home" class="panel" role="tabpanel">
       <div class="card intro">
         <h2>Unlock your boost clock <span class="help-anchor" data-help="workflow"></span></h2>
         <p id="vbios-line" class="muted">Reading VBIOS&hellip;</p>
@@ -40,6 +115,13 @@
           </label>
           <input type="number" id="workers" min="1" max="32" value="4" />
           <button id="scan-btn" class="primary">Scan</button>
+        </div>
+        <div class="row">
+          <label class="checkbox">
+            <input type="checkbox" id="deep-scan" />
+            Enable OverDrive &amp; metrics (deep scan)
+            <span class="help-anchor" data-help="deep_scan"></span>
+          </label>
         </div>
         <div class="progress hidden" id="scan-progress-wrap">
           <div class="progress-bar"><div id="scan-progress" class="progress-fill"></div></div>

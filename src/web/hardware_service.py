@@ -63,10 +63,19 @@ ERROR_MESSAGES: Dict[str, str] = {
         "the driver's clock table lives."
     ),
     "dma_unavailable": (
-        "Live metrics need the GPU DMA buffer, which has not been located yet. "
-        "Run a DRAM scan in the desktop app to enable metrics, then try again."
+        "This action needs the GPU DMA buffer, which has not been located yet. "
+        "Run a Scan with 'Enable OverDrive & metrics (deep scan)' ticked first, "
+        "then try again."
     ),
     "metrics_failed": "Failed to read the SMU metrics table.",
+    "power_limit_failed": (
+        "The firmware rejected the power-limit change. Try a value closer to "
+        "your card's stock limit. See the server console for details."
+    ),
+    "od_failed": (
+        "The firmware rejected the OverDrive change. The value may be outside "
+        "the range your card accepts. See the server console for details."
+    ),
     "generic": "The requested hardware action could not be completed.",
 }
 
@@ -183,6 +192,7 @@ def _get_vbios_values_or_defaults():
 def run_scan(
     *,
     num_threads: int = 0,
+    deep_scan: bool = False,
     progress: ProgressFn = _noop_progress,
     log: LogFn = _noop_log,
 ) -> Dict[str, Any]:
@@ -190,6 +200,11 @@ def run_scan(
 
     Returns a JSON-serialisable summary and caches it for a later Apply.
     Raises :class:`HardwareUnavailable` on any hardware/engine failure.
+
+    When *deep_scan* is true the (slower) DMA-buffer discovery runs as well,
+    which unlocks the OverDrive controls (GFX clock offset, OD PPT) and live
+    metrics for the rest of the session.  The discovered offset is cached in
+    memory so later OverDrive applies reuse it without re-scanning.
     """
     engine = _import_engine()
 
@@ -199,7 +214,10 @@ def run_scan(
         hw = None
         try:
             try:
-                hw = engine.init_hardware(skip_dma_discovery=True)
+                hw = engine.init_hardware(
+                    skip_dma_discovery=not deep_scan,
+                    gui_log=(log if deep_scan else None),
+                )
             except Exception as exc:  # noqa: BLE001
                 _log.warning("init_hardware failed: %s", exc)
                 raise HardwareUnavailable(
@@ -369,6 +387,225 @@ def apply_boost_clock(
                 "skipped_count": skipped,
                 "message": msg,
             }
+        finally:
+            if hw:
+                try:
+                    engine.cleanup_hardware(hw)
+                except Exception:  # noqa: BLE001
+                    pass
+
+
+# ---------------------------------------------------------------------------
+# Power limit (SMU SetPptLimit -- works without the DMA buffer)
+# ---------------------------------------------------------------------------
+
+# Conservative absolute clamp for the power-limit control.  This is a guard
+# rail, not a recommendation: stay close to your card's stock limit and only
+# nudge it up a little (see the Performance-tab help).
+POWER_LIMIT_MIN_W = 100
+POWER_LIMIT_MAX_W = 400
+
+
+def set_power_limit(
+    watts: int,
+    *,
+    progress: ProgressFn = _noop_progress,
+    log: LogFn = _noop_log,
+) -> Dict[str, Any]:
+    """Set the GPU package-power (PPT) limit in watts via the SMU mailbox.
+
+    This is the single knob that reliably sticks on RDNA4: it sends
+    ``SetPptLimit`` directly to the firmware and does **not** need the DMA
+    buffer, so it works straight after launch without a deep scan.
+    """
+    engine = _import_engine()
+    try:
+        watts = int(watts)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Power limit must be a whole number of watts.") from exc
+    if not (POWER_LIMIT_MIN_W <= watts <= POWER_LIMIT_MAX_W):
+        raise ValueError(
+            f"Power limit must be between {POWER_LIMIT_MIN_W} and "
+            f"{POWER_LIMIT_MAX_W} W."
+        )
+
+    with _hw_lock:
+        hw = None
+        try:
+            try:
+                hw = engine.init_hardware(skip_dma_discovery=True)
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("init_hardware failed: %s", exc)
+                raise HardwareUnavailable(
+                    ERROR_MESSAGES["init_failed"], code="init_failed"
+                ) from exc
+
+            smu = hw["smu"]
+            progress(20, f"Reading current power limit…")
+            try:
+                before = smu.get_ppt_limit()
+            except Exception:  # noqa: BLE001 - read-back is best-effort
+                before = None
+
+            progress(50, f"Setting power limit to {watts} W…")
+            try:
+                smu.set_ppt_limit(watts)
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("set_ppt_limit failed: %s", exc)
+                raise HardwareUnavailable(
+                    ERROR_MESSAGES["power_limit_failed"],
+                    code="power_limit_failed",
+                ) from exc
+
+            try:
+                after = smu.get_ppt_limit()
+            except Exception:  # noqa: BLE001
+                after = None
+
+            progress(100, "Power limit applied.")
+            msg = f"Power limit set to {watts} W"
+            if after is not None:
+                msg += f" (firmware now reports {after} W)"
+            msg += "."
+            log(msg)
+            return {
+                "ok": True,
+                "requested_w": watts,
+                "before_w": before,
+                "after_w": after,
+                "message": msg,
+            }
+        finally:
+            if hw:
+                try:
+                    engine.cleanup_hardware(hw)
+                except Exception:  # noqa: BLE001
+                    pass
+
+
+# ---------------------------------------------------------------------------
+# OverDrive controls (GFX clock offset, OD PPT %) -- need the DMA buffer,
+# i.e. a prior deep scan in this process so the offset is cached.
+# ---------------------------------------------------------------------------
+
+def _require_dma(engine):
+    """init_hardware reusing a cached DMA offset; raise if none is available."""
+    hw = engine.init_hardware(skip_dma_discovery=True)
+    if hw.get("virt") is None:
+        try:
+            engine.cleanup_hardware(hw)
+        except Exception:  # noqa: BLE001
+            pass
+        raise HardwareUnavailable(
+            ERROR_MESSAGES["dma_unavailable"], code="dma_unavailable"
+        )
+    return hw
+
+
+def apply_gfx_offset(
+    offset_mhz: int,
+    *,
+    progress: ProgressFn = _noop_progress,
+    log: LogFn = _noop_log,
+) -> Dict[str, Any]:
+    """Apply a GFX clock frequency offset (MHz) through the OverDrive table.
+
+    Requires a prior deep scan (so the DMA buffer offset is cached).
+    """
+    engine = _import_engine()
+    try:
+        offset_mhz = int(offset_mhz)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("GFX offset must be a whole number of MHz.") from exc
+    if not (-1000 <= offset_mhz <= 1000):
+        raise ValueError("GFX offset must be between -1000 and +1000 MHz.")
+
+    with _hw_lock:
+        hw = None
+        try:
+            try:
+                hw = _require_dma(engine)
+            except HardwareUnavailable:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("init_hardware failed: %s", exc)
+                raise HardwareUnavailable(
+                    ERROR_MESSAGES["init_failed"], code="init_failed"
+                ) from exc
+
+            progress(40, f"Applying GFX offset {offset_mhz:+d} MHz…")
+
+            def _modify(od):
+                od.FeatureCtrlMask |= (1 << engine.PP_OD_FEATURE_GFXCLK_BIT)
+                od.GfxclkFoffset = offset_mhz
+
+            ok, err = engine.apply_od_single_field(hw["smu"], hw["virt"], _modify)
+            if not ok:
+                _log.warning("apply GFX offset failed: %s", err)
+                raise HardwareUnavailable(
+                    ERROR_MESSAGES["od_failed"], code="od_failed"
+                )
+            progress(100, "GFX offset applied.")
+            msg = f"GFX clock offset set to {offset_mhz:+d} MHz."
+            log(msg)
+            return {"ok": True, "offset_mhz": offset_mhz, "message": msg}
+        finally:
+            if hw:
+                try:
+                    engine.cleanup_hardware(hw)
+                except Exception:  # noqa: BLE001
+                    pass
+
+
+def apply_od_ppt(
+    pct: int,
+    *,
+    progress: ProgressFn = _noop_progress,
+    log: LogFn = _noop_log,
+) -> Dict[str, Any]:
+    """Apply an OverDrive PPT percentage (power-limit % over default).
+
+    Requires a prior deep scan (DMA buffer cached).  This is the OverDrive-table
+    equivalent of the absolute :func:`set_power_limit` knob; prefer the absolute
+    watt control unless you specifically want a percentage offset.
+    """
+    engine = _import_engine()
+    try:
+        pct = int(pct)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("OD PPT must be a whole-number percentage.") from exc
+    if not (-30 <= pct <= 30):
+        raise ValueError("OD PPT must be between -30% and +30%.")
+
+    with _hw_lock:
+        hw = None
+        try:
+            try:
+                hw = _require_dma(engine)
+            except HardwareUnavailable:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("init_hardware failed: %s", exc)
+                raise HardwareUnavailable(
+                    ERROR_MESSAGES["init_failed"], code="init_failed"
+                ) from exc
+
+            progress(40, f"Applying OD PPT {pct:+d}%…")
+
+            def _modify(od):
+                od.FeatureCtrlMask |= (1 << engine.PP_OD_FEATURE_PPT_BIT)
+                od.Ppt = pct
+
+            ok, err = engine.apply_od_single_field(hw["smu"], hw["virt"], _modify)
+            if not ok:
+                _log.warning("apply OD PPT failed: %s", err)
+                raise HardwareUnavailable(
+                    ERROR_MESSAGES["od_failed"], code="od_failed"
+                )
+            progress(100, "OD PPT applied.")
+            msg = f"OverDrive PPT set to {pct:+d}% over default."
+            log(msg)
+            return {"ok": True, "pct": pct, "message": msg}
         finally:
             if hw:
                 try:

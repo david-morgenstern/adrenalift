@@ -70,6 +70,77 @@ TOOLTIPS: Dict[str, Tooltip] = {
             "number of CPU cores is usually a good balance."
         ),
     },
+    "deep_scan": {
+        "tip": "Also locate the GPU DMA buffer to unlock OverDrive + live metrics.",
+        "description": (
+            "A normal scan only finds the PowerPlay table, which is all the "
+            "Boost Clock patch needs. Tick <b>deep scan</b> to additionally "
+            "locate the driver's GPU DMA buffer. That unlocks the OverDrive "
+            "controls (GFX clock offset, OD PPT%) and the live Metrics tab for "
+            "the rest of the session. It is slower (it probes the GPU memory "
+            "aperture, which can take 30 seconds or more) and is only needed "
+            "once per session — the location is then remembered until you "
+            "close the server."
+        ),
+    },
+    # -- Performance tab --------------------------------------------------
+    "performance": {
+        "tip": "The handful of settings that actually move performance on RDNA4.",
+        "description": (
+            "This tab gathers the knobs that matter for real-world gains and "
+            "leaves the experimental ones elsewhere. On RDNA4 the most reliable "
+            "win is a small <b>power-limit</b> bump; the boost-clock ceiling and "
+            "GFX offset help on some cards but the driver/firmware often clamps "
+            "them back. Make one change at a time and test stability before "
+            "stacking another."
+        ),
+    },
+    "power_limit": {
+        "tip": "GPU package-power (PPT) limit in watts — the knob that reliably sticks.",
+        "description": (
+            "Raises or lowers the total board power the GPU is allowed to draw, "
+            "sent straight to the firmware (it does not need a deep scan). A "
+            "higher limit lets the card hold its boost clock longer under load, "
+            "which is usually the single most effective change on RDNA4. Stay "
+            "close to your card's stock limit: many AIB models already ship a "
+            "little higher than reference, so a modest nudge (for example a "
+            "reference 330&nbsp;W card up to ~340&nbsp;W) is a safe, well-trodden "
+            "increase. Large jumps raise heat and power draw — watch "
+            "temperatures on the Metrics tab."
+        ),
+    },
+    "power_template": {
+        "tip": "Apply the recommended safe power-limit bump.",
+        "description": (
+            "Fills in and applies a conservative power limit that is known to "
+            "be safe on most RDNA4 boards (a small step above a 330&nbsp;W "
+            "reference limit, the level several higher-tier AIB cards already "
+            "ship at). It is a starting point, not a maximum — verify "
+            "stability and temperatures, then adjust to taste."
+        ),
+    },
+    "gfx_offset": {
+        "tip": "Shift the GFX clock up or down by a fixed MHz offset (OverDrive).",
+        "description": (
+            "Applies a frequency offset to the graphics clock through the "
+            "OverDrive table. A positive offset asks for higher clocks at a "
+            "given voltage; a negative one undervolts-by-frequency for cooler, "
+            "quieter operation. This needs a <b>deep scan</b> first so the DMA "
+            "buffer is available. RDNA4 firmware may ignore or clamp large "
+            "offsets — start with a small value (e.g. +25–100&nbsp;MHz) "
+            "and confirm it took effect on the Status/Metrics tabs."
+        ),
+    },
+    "od_ppt": {
+        "tip": "Power limit as a percentage over default (OverDrive PPT).",
+        "description": (
+            "The OverDrive-table way to express a power-limit change, as a "
+            "percentage above (or below) the card's default rather than an "
+            "absolute watt figure. Prefer the absolute <b>Power limit (W)</b> "
+            "control unless you specifically want a percentage. Needs a deep "
+            "scan first."
+        ),
+    },
     # -- Boost clock ------------------------------------------------------
     "boost_clock": {
         "tip": "Target maximum boost frequency, in MHz.",
@@ -150,11 +221,62 @@ TOOLTIPS: Dict[str, Tooltip] = {
 
 # Friendly one-line summaries shown in the help navigation list.  Order here
 # defines the order the pages appear in the UI.
+# A page entry uses either ``const`` (pulled from src.app.help_texts) or
+# ``html`` (inline, defined here for web-only pages such as Performance).
+PERFORMANCE_HELP_HTML = """
+<h3>Settings that actually matter for performance</h3>
+<p>Adrenalift exposes a lot of knobs, but on RDNA4 only a few make a
+dependable difference. Here is what to reach for, in order.</p>
+
+<h4>1. Power limit (PPT) &mdash; the reliable one</h4>
+<p>The graphics driver and SMU firmware aggressively clamp clocks back to
+their idea of "allowed", so raising a clock ceiling often does nothing visible.
+What the firmware <i>does</i> honour is the <b>power limit</b>. Giving the card
+a little more power budget lets it sustain its boost clock longer under load,
+which is the most consistent real-world gain. Many partner cards (Red Devil,
+Taichi, etc.) already ship above the reference limit, so nudging a reference
+330&nbsp;W board to about <b>340&nbsp;W</b> is a safe, validated step that
+other brands allow out of the box. Use the <b>Power limit (W)</b> control (or
+the one-click safe template).</p>
+
+<h4>2. Boost clock ceiling</h4>
+<p>The original feature: patch the driver's cached PowerPlay table so the GPU
+is <i>allowed</i> to reach a higher boost clock. On some cards this helps; on
+many RDNA4 cards the firmware still clamps the result. Harmless to try &mdash;
+scan, set a value slightly above stock, apply, and check whether clocks under
+load actually rise.</p>
+
+<h4>3. GFX clock offset (OverDrive)</h4>
+<p>A fixed MHz shift applied through the OverDrive table. A small positive
+offset can squeeze out a little more frequency; a small negative offset acts
+as a frequency-based undervolt for lower temperatures and noise. Requires a
+<b>deep scan</b> so the DMA buffer is available, and large offsets are often
+ignored &mdash; keep it modest.</p>
+
+<h4>A safe starting template</h4>
+<ul>
+  <li><b>Power limit:</b> stock + ~10&nbsp;W (e.g. 330&nbsp;&rarr;&nbsp;340&nbsp;W).</li>
+  <li><b>Boost clock:</b> optional, +50\u2013100&nbsp;MHz over stock, only if it
+      measurably helps.</li>
+  <li><b>GFX offset:</b> 0 to start; try +25\u201350&nbsp;MHz once the above is
+      stable.</li>
+</ul>
+<p>Change one thing at a time, run a real workload, and watch temperatures and
+the throttling readout on the <b>Metrics</b> tab. Everything here lives only in
+RAM &mdash; a reboot restores stock values.</p>
+"""
+
 _HELP_PAGES_META: List[Dict[str, str]] = [
+    {
+        "id": "performance",
+        "title": "Performance settings that matter",
+        "summary": "Start here \u2014 the few knobs that actually help on RDNA4.",
+        "html": PERFORMANCE_HELP_HTML,
+    },
     {
         "id": "how_it_works",
         "title": "How Adrenalift works",
-        "summary": "Start here \u2014 what scanning and applying actually do.",
+        "summary": "What scanning and applying actually do.",
         "const": "SIMPLE_HOW_IT_WORKS_HTML",
     },
     {
@@ -220,7 +342,9 @@ def _load_help_html() -> Dict[str, str]:
         return {}
     out: Dict[str, str] = {}
     for meta in _HELP_PAGES_META:
-        out[meta["const"]] = getattr(help_texts, meta["const"], "")
+        const = meta.get("const")
+        if const:
+            out[const] = getattr(help_texts, const, "")
     return out
 
 
@@ -229,12 +353,14 @@ def help_pages() -> List[Dict[str, str]]:
     html_by_const = _load_help_html()
     pages: List[Dict[str, str]] = []
     for meta in _HELP_PAGES_META:
+        # Inline ``html`` (web-only pages) wins; otherwise pull from help_texts.
+        body = meta.get("html") or html_by_const.get(meta.get("const", ""), "")
         pages.append(
             {
                 "id": meta["id"],
                 "title": meta["title"],
                 "summary": meta["summary"],
-                "html": html_by_const.get(meta["const"], ""),
+                "html": body,
             }
         )
     return pages

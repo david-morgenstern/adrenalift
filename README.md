@@ -74,12 +74,19 @@ python -m src.web
 
 Then open <http://127.0.0.1:8770> in your browser.
 
+- **Performance** tab — the settings that actually move performance on RDNA4,
+  in one place: the **power limit (W)** (the most reliable win — sent straight
+  to the firmware, no scan needed), a **GFX clock offset**, and an advanced
+  **OverDrive PPT %**. Includes a one-click safe power-limit template.
 - **Boost Clock** tab — Scan memory, then choose a boost clock and Apply
-  (the same Simple-tab workflow as the desktop app).
+  (the same Simple-tab workflow as the desktop app). Tick **Enable OverDrive &
+  metrics (deep scan)** to also locate the GPU DMA buffer, which unlocks the
+  GFX-offset / OD-PPT controls and the live Metrics tab for the session.
 - **Status** tab — read live SMU state, power limit, and DPM clock ranges.
 - **Metrics** tab — live GPU sensor readout (clocks, power, temps, fan, …).
-- **Help** tab — the full set of in-app guides; every control also has a
-  `?` button with a short tip and a plain-language description.
+- **Help** tab — the full set of in-app guides (start with *Performance settings
+  that matter*); every control also has a `?` button with a short tip and a
+  plain-language description.
 
 Options:
 
@@ -156,6 +163,28 @@ python -m PyInstaller --noconfirm build.spec
 ```
 
 The output `.exe` is written to `dist/`.
+
+### Building the web console exe
+
+To ship the **browser front-end** as a standalone executable (instead of the
+desktop GUI), use the web build scripts. The resulting exe starts the local web
+server and opens your browser automatically; it bundles the HTML/CSS/JS assets
+and Flask instead of Qt.
+
+```powershell
+.\build_web.ps1
+```
+
+Or manually:
+
+```bash
+python -m PyInstaller --noconfirm build_web.spec
+```
+
+The output `dist\Adrenalift_Web_x.x_xx.exe` requests admin elevation, starts the
+server on <http://127.0.0.1:8770>, and opens the browser. The same driver files
+in `drivers/` and (optional) `bios/vbios.rom` requirements apply as for the
+desktop build.
 
 ### UPP (Uplift Power Play)
 
