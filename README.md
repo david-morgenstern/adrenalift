@@ -187,13 +187,19 @@ adrenalift/
 └── ...
 ```
 
-3. **Place driver binaries** in `drivers/`:
+3. **Driver binaries — already included.** This fork ships all four driver
+   files in `drivers/` and the build bundles them into the exe, so there is
+   nothing to download or copy:
    - `inpoutx64.dll`
    - `WinRing0x64.dll`
    - `WinRing0x64.sys`
-   - `WinRing0x64_patched.sys` (optional — removes the 1 MB physical memory restriction)
+   - `WinRing0x64_patched.sys` (removes the 1 MB physical-memory restriction;
+     needs Windows test-signing mode to load — see DRIVERS.md)
 
-   See **[DRIVERS.md](DRIVERS.md)** for details on each driver, what the patched version changes, and how to independently verify the patch with `python tools/verify_patch.py`.
+   The build (`build_web.spec`) and CI **fail** if any of these is missing, so a
+   released `.exe` is always self-contained. See **[DRIVERS.md](DRIVERS.md)** for
+   each driver's origin, what the patched version changes, and how to verify the
+   patch with `python tools/verify_patch.py`.
 
 4. **Build:**
 

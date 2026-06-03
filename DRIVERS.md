@@ -1,6 +1,6 @@
 # Driver Binaries
 
-Adrenalift uses two third-party kernel drivers to access GPU hardware from user space. Neither driver is included in this repository — you must supply them yourself in the `drivers/` folder before building.
+Adrenalift uses two third-party kernel drivers to access GPU hardware from user space. **This fork ships all of them in the [`drivers/`](drivers/) folder, and the build bundles them into the exe** — you do not need to download or copy anything, and the released `.exe` is self-contained. (The CI build fails if any driver is missing, so a release can never go out incomplete.) The table below documents their origin for transparency and in case you want to rebuild or verify them yourself.
 
 | File | Source | Purpose |
 |------|--------|---------|

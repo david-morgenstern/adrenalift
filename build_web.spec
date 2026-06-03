@@ -29,7 +29,10 @@ _exe_name = f"Adrenalift_Web_{_version_info['version']}_{_version_info['build']}
 upp_src = os.path.join(SPECPATH, "deps", "upp", "src")
 upp_available = os.path.isdir(upp_src)
 
-# Collect InpOut32/WinRing0 driver files from drivers/ if present
+# Collect the InpOut32 + WinRing0 driver files.  ALL of them are bundled so the
+# released exe is fully self-contained -- the user never has to download or copy
+# a driver.  Any missing file FAILS the build (a release must never ship without
+# its drivers); this is what guarantees "everything included".
 driver_files = []
 drivers_dir = os.path.join(SPECPATH, "drivers")
 driver_names = [
@@ -38,15 +41,25 @@ driver_names = [
     "WinRing0x64.sys",
     "WinRing0x64_patched.sys",
 ]
+_missing_drivers = []
 for name in driver_names:
     path = os.path.join(drivers_dir, name)
     if os.path.isfile(path):
         driver_files.append((path, "."))
+    else:
+        _missing_drivers.append(name)
 
-if not any("inpoutx64" in p for p, _ in driver_files):
-    print("WARNING: inpoutx64.dll not found in drivers/. Copy driver files to drivers/ before building.")
+if _missing_drivers:
+    raise SystemExit(
+        "build_web.spec: required driver file(s) missing from drivers/: "
+        + ", ".join(_missing_drivers)
+        + ".\nThe released exe must bundle every driver. See DRIVERS.md."
+    )
 if not upp_available:
-    print("WARNING: upp package not found at deps/upp/src. Clone it: git clone https://github.com/sibradzic/upp.git deps/upp")
+    raise SystemExit(
+        "build_web.spec: UPP (VBIOS decoding) not found at deps/upp/src.\n"
+        "Clone it first: git clone https://github.com/sibradzic/upp.git deps/upp"
+    )
 
 # Web assets (Jinja templates + static JS/CSS) are bundled below via Tree() so
 # the frozen server can serve them.  They unpack under sys._MEIPASS/src/web/...,
