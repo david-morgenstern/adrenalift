@@ -40,10 +40,28 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Verify bundled drivers are present
+        shell: bash
+        run: |
+          set -e
+          missing=0
+          for f in inpoutx64.dll WinRing0x64.dll WinRing0x64.sys WinRing0x64_patched.sys; do
+            if [ -f "drivers/$f" ]; then
+              echo "ok: drivers/$f"
+            else
+              echo "::error::Missing driver drivers/$f — the exe would ship incomplete."
+              missing=1
+            fi
+          done
+          [ "$missing" = "0" ] || { echo "Refusing to build without all drivers."; exit 1; }
+
       - name: Build the web console exe
         run: python -m PyInstaller --noconfirm build_web.spec
 
+      # Desktop GUI is not shipped from this fork; keep building it for parity
+      # but never let a desktop-only failure block the web console release.
       - name: Build the desktop GUI exe
+        continue-on-error: true
         run: python -m PyInstaller --noconfirm build.spec
 
       - name: List build output
