@@ -51,6 +51,13 @@ def _elog(msg: str):
         _engine_log.info(msg)
     except Exception:
         pass
+
+
+try:
+    from src.diagnostics import log_environment_snapshot as _log_env_snapshot
+except Exception:  # pragma: no cover - never block engine on diagnostics
+    def _log_env_snapshot(log=None, *, force=False, inpout=None):
+        return None
 from src.engine.od_table import (TABLE_OVERDRIVE, TABLE_SMU_METRICS, TABLE_PPTABLE,
                       TABLE_CUSTOM_SKUTABLE,
                       decode_od_fail,
@@ -2709,6 +2716,13 @@ def init_hardware(gui_log=None, skip_dma_discovery=False):
     """
     _elog("init_hardware: starting")
     wr0, inpout, mmio, smu, vram_bar = create_smu(verbose=False)
+    _elog(f"init_hardware: create_smu OK, vram_bar=0x{vram_bar:X}")
+    # Emit the one-shot environment snapshot now that we have a live
+    # InpOut handle (so we can report patched-vs-original WinRing0).
+    try:
+        _log_env_snapshot(_elog, inpout=inpout)
+    except Exception as e:
+        _elog(f"init_hardware: env snapshot failed: {e}")
 
     # Fast path: reuse the offset discovered by a previous init_hardware
     # call in this process (avoids redundant 30+ second BAR scans).
@@ -4458,9 +4472,20 @@ def apply_od_settings(smu, virt, settings):
 
     Returns dict of command results.
     """
+    def _rn(code):
+        # Friendly SMU response code name (FAIL / OK / UNUSED / ...).
+        try:
+            return _RESP_NAMES.get(code, f"0x{code:X}")
+        except Exception:
+            return repr(code)
+
     results = {}
     min_clock = settings.effective_min_clock
     lock_features = settings.effective_lock_features
+    _elog(f"apply_od_settings: requested boost_max={settings.effective_max} "
+          f"min={min_clock} ppt={settings._power_ac()}W "
+          f"offset={settings.offset} od_ppt={settings.od_ppt} "
+          f"od_tdc={settings.od_tdc} lock_features={lock_features}")
 
     # OD table
     od = read_od(smu, virt)
@@ -4488,6 +4513,11 @@ def apply_od_settings(smu, virt, settings):
         smu.hdp_flush()
         resp, _ = smu.send_msg(smu.transfer_write, TABLE_OVERDRIVE)
         results['od_commit'] = resp
+        _elog(f"apply_od_settings: od_commit -> {_rn(resp)}")
+    else:
+        _elog("apply_od_settings: read_od returned None -- OD table commit "
+              "skipped (DMA buffer unavailable; run a deep scan to enable "
+              "OverDrive)")
 
     # Frequency limits
     effective_max = settings.effective_max
@@ -4496,16 +4526,22 @@ def apply_od_settings(smu, virt, settings):
     results['soft_max'] = resp
     resp, _ = smu.send_msg(PPSMC.SetHardMaxByFreq, param_max)
     results['hard_max'] = resp
+    _elog(f"apply_od_settings: SetSoft/HardMax({effective_max}) -> "
+          f"soft={_rn(results['soft_max'])} hard={_rn(results['hard_max'])}")
 
     param_min = ((PPCLK.GFXCLK & 0xFFFF) << 16) | (min_clock & 0xFFFF)
     resp, _ = smu.send_msg(PPSMC.SetSoftMinByFreq, param_min)
     results['soft_min'] = resp
     resp, _ = smu.send_msg(PPSMC.SetHardMinByFreq, param_min)
     results['hard_min'] = resp
+    _elog(f"apply_od_settings: SetSoft/HardMin({min_clock}) -> "
+          f"soft={_rn(results['soft_min'])} hard={_rn(results['hard_min'])}")
 
     # Power limit
     resp, _ = smu.send_msg(PPSMC.SetPptLimit, settings._power_ac())
     results['ppt_limit'] = resp
+    _elog(f"apply_od_settings: SetPptLimit({settings._power_ac()}W) -> "
+          f"{_rn(resp)}")
 
     # GfxOff
     smu.send_msg(PPSMC.DisallowGfxOff)
@@ -4517,12 +4553,47 @@ def apply_od_settings(smu, virt, settings):
                      (1 << SMU_FEATURE.GFXOFF))
         resp, _ = smu.send_msg(PPSMC.DisableSmuFeaturesLow, feat_mask)
         results['disable_features'] = resp
+        _elog(f"apply_od_settings: DisableSmuFeaturesLow(0x{feat_mask:X}) -> "
+              f"{_rn(resp)}")
 
     # Workload cycle to trigger DPM refresh
     smu.send_msg(PPSMC.SetWorkloadMask, 1 << 2)  # PowerSave
     time.sleep(0.3)
     smu.send_msg(PPSMC.SetWorkloadMask, 1 << 1)  # 3D Fullscreen
     time.sleep(0.3)
+
+    # ---- Post-apply readback: catch the "SMU silently clamped" case ----
+    # The most common reason "nothing works except the power limit" is that
+    # SetSoft/HardMax succeeds (resp=OK) but the firmware refuses to raise
+    # the actual DPM ceiling above the cached PowerPlay limit.  Query what
+    # the firmware *now* reports and warn if it's below what we asked for.
+    try:
+        fmax = smu.get_max_freq(PPCLK.GFXCLK)
+        fmin = smu.get_min_freq(PPCLK.GFXCLK)
+        results['readback_gfx_max'] = fmax
+        results['readback_gfx_min'] = fmin
+        if fmax < effective_max:
+            _elog(f"apply_od_settings: WARNING: GFXCLK max readback={fmax} "
+                  f"is below requested {effective_max} -- firmware clamped "
+                  f"(driver-side PowerPlay limit still in effect; patching "
+                  f"the cached PP table or raising it via the OverDrive tab "
+                  f"may be required)")
+        else:
+            _elog(f"apply_od_settings: readback OK -- GFXCLK min={fmin} "
+                  f"max={fmax} (matches request)")
+    except Exception as e:
+        _elog(f"apply_od_settings: GFX readback failed: {e}")
+
+    try:
+        ppt_now = smu.get_ppt_limit()
+        results['readback_ppt'] = ppt_now
+        if ppt_now != settings._power_ac():
+            _elog(f"apply_od_settings: WARNING: PPT readback={ppt_now}W "
+                  f"differs from requested {settings._power_ac()}W")
+        else:
+            _elog(f"apply_od_settings: PPT readback={ppt_now}W (matches request)")
+    except Exception as e:
+        _elog(f"apply_od_settings: PPT readback failed: {e}")
 
     return results
 
@@ -4539,6 +4610,10 @@ def verify_patches(inpout, scan_result, settings):
     valid_addrs = scan_result.valid_addrs
     details = []
     overwritten = 0
+    _elog(f"verify_patches: checking {len(valid_addrs)} cached PP-table "
+          f"copies; expecting game={settings._game_clock()} "
+          f"boost={settings._boost_clock()} ppt_ac={settings._power_ac()} "
+          f"tdc_gfx={settings._tdc_gfx()}")
 
     for i, addr in enumerate(valid_addrs):
         ml_base = addr + 28
@@ -4575,8 +4650,25 @@ def verify_patches(inpout, scan_result, settings):
             if settings.tdc_soc > 0:
                 patch_u16(inpout, ml_base, ML_TDC_SOC, settings.tdc_soc)
             detail['repatched'] = True
+            _elog(f"verify_patches: copy[{i}] @0x{addr:X} OVERWRITTEN by "
+                  f"driver (game={game_now}->{settings._game_clock()}, "
+                  f"ppt={ml['ppt0_ac']}->{settings._power_ac()}, "
+                  f"tdc={ml['tdc_gfx']}->{settings._tdc_gfx()}) -- re-patched")
+        else:
+            _elog(f"verify_patches: copy[{i}] @0x{addr:X} OK "
+                  f"(game={game_now} boost={boost_now} "
+                  f"ppt={ml['ppt0_ac']} tdc={ml['tdc_gfx']})")
 
         details.append(detail)
+
+    if overwritten:
+        _elog(f"verify_patches: {overwritten}/{len(valid_addrs)} copies were "
+              f"overwritten by the driver and have been re-patched "
+              f"(this is normal background churn; sustained overwrites "
+              f"after Apply indicate the driver is fighting the patch)")
+    else:
+        _elog(f"verify_patches: all {len(valid_addrs)} copies still hold "
+              f"patched values")
 
     return overwritten == 0, overwritten, details
 
