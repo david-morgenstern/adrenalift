@@ -77,6 +77,11 @@ def create_app() -> Flask:
     )
     jobs = JobManager()
 
+    # Release the persistent hardware handle (and the WinRing0 driver service)
+    # on a clean shutdown so the next launch starts from a known state.
+    import atexit
+    atexit.register(hw.shutdown_hardware)
+
     # -- pages -----------------------------------------------------------
     @app.route("/")
     def index():
@@ -96,6 +101,7 @@ def create_app() -> Flask:
                 "engine": hw.engine_status(),
                 "vbios": hw.vbios_summary(),
                 "last_scan": hw.last_scan_summary(),
+                "degraded": hw.degraded_reason(),
             }
         )
 

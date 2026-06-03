@@ -204,13 +204,10 @@
           <span class="help-anchor" data-help="metrics"></span>
         </h3>
         <div class="row">
-          <button id="metrics-btn" class="primary">Read metrics</button>
-          <label class="checkbox">
-            <input type="checkbox" id="metrics-auto" />
-            Auto-refresh
-            <span class="help-anchor" data-help="metrics_auto"></span>
-          </label>
+          <button id="metrics-btn" class="primary">Refresh metrics</button>
         </div>
+        <p class="muted">Metrics are read once per click, on demand &mdash; no
+          background polling, so nothing touches the GPU driver unless you ask.</p>
         <div id="metrics-result" class="result"></div>
       </div>
     </section>

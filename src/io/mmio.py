@@ -94,6 +94,24 @@ _STATUS_MESSAGES = {
     9: "Unknown error",
 }
 
+
+def _friendly_winring0_error(e):
+    """Turn a raw WinRing0 load exception into actionable, plain-language text."""
+    winerr = getattr(e, "winerror", None)
+    text = str(e)
+    base = f"WinRing0 initialization failed: {text}"
+    if winerr == 32 or "being used by another process" in text.lower():
+        return (
+            base + "\n"
+            "The WinRing0 driver file is locked by another program. Close any "
+            "other hardware-monitoring or overclocking tool (HWiNFO, MSI "
+            "Afterburner / RivaTuner, GPU-Z, ZenTimings, LibreHardwareMonitor, "
+            "OCCT), then relaunch Adrenalift. If it persists, reboot to clear a "
+            "stuck driver and start Adrenalift before any sensor tool."
+        )
+    return base
+
+
 # ---------------------------------------------------------------------------
 # IOCTL structures (packed to match driver's #pragma pack(push, 4))
 # ---------------------------------------------------------------------------
@@ -209,8 +227,12 @@ class WinRing0:
         if prefer_patched:
             # Try patched driver first (full physical memory support)
             try:
-                dll_path, _ = self._ensure_installed(use_patched=True)
+                # Stop/delete any stale service BEFORE copying the .sys.  An old
+                # (or crashed) instance that still has the driver loaded keeps
+                # the file open, so copying over it would raise WinError 32
+                # (sharing violation).  Stopping first releases that lock.
                 self._stop_existing_service()
+                dll_path, _ = self._ensure_installed(use_patched=True)
                 self._dll = ctypes.WinDLL(dll_path)
                 self._setup_dll_functions()
                 if self._dll.InitializeOls():
@@ -226,8 +248,8 @@ class WinRing0:
         if not loaded:
             # Fall back to original driver
             try:
-                dll_path, _ = self._ensure_installed(use_patched=False)
                 self._stop_existing_service()
+                dll_path, _ = self._ensure_installed(use_patched=False)
                 if self._dll is None:
                     self._dll = ctypes.WinDLL(dll_path)
                     self._setup_dll_functions()
@@ -249,7 +271,7 @@ class WinRing0:
             except RuntimeError:
                 raise
             except Exception as e:
-                raise RuntimeError(f"WinRing0 initialization failed: {e}")
+                raise RuntimeError(_friendly_winring0_error(e))
 
         # --- Open direct handle to driver for IOCTL ---
         self._open_device()
@@ -348,11 +370,51 @@ class WinRing0:
                 f"Place files in: {project_root}\n"
             )
 
-        # Always copy fresh to ensure we're using the right version
-        shutil.copy2(source_dll, target_dll)
-        shutil.copy2(source_sys, target_sys)
+        # Copy the driver files next to the host exe.  Skip the copy when the
+        # target is already byte-identical (the common case once our driver is
+        # loaded) and tolerate a locked destination (.sys held open by an
+        # already-running WinRing0 service): InitializeOls() attaches fine to an
+        # already-loaded identical driver, so reusing the existing file is safe.
+        WinRing0._safe_copy(source_dll, target_dll, "WinRing0x64.dll")
+        WinRing0._safe_copy(source_sys, target_sys, "WinRing0x64.sys")
 
         return target_dll, target_sys
+
+    @staticmethod
+    def _files_identical(a, b):
+        """True if files *a* and *b* exist and have identical bytes."""
+        try:
+            if os.path.getsize(a) != os.path.getsize(b):
+                return False
+            with open(a, "rb") as fa, open(b, "rb") as fb:
+                return fa.read() == fb.read()
+        except OSError:
+            return False
+
+    @staticmethod
+    def _safe_copy(src, dst, label):
+        """Copy *src* -> *dst*, tolerating an already-correct or locked target.
+
+        Returns True when *dst* is usable afterwards.  Raises only when the
+        copy fails and no usable file already exists at *dst*.
+        """
+        if os.path.isfile(dst) and WinRing0._files_identical(src, dst):
+            # Already the right file (e.g. our driver is already loaded from
+            # it).  Nothing to copy -- avoids the sharing-violation entirely.
+            return True
+        try:
+            shutil.copy2(src, dst)
+            return True
+        except OSError as e:
+            winerr = getattr(e, "winerror", None)
+            # 32 = sharing violation (file in use), 5 = access denied.  If a
+            # usable file already exists at the target, reuse it rather than
+            # treating this as fatal.
+            if winerr in (32, 5) and os.path.isfile(dst) and os.path.getsize(dst) > 0:
+                print(f"[WR0] {label} is in use ({e}); reusing the existing "
+                      f"file already in place.")
+                return True
+            raise
 
     # -- DLL function signatures --
 
