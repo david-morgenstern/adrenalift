@@ -62,9 +62,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION=$(python -c "import json; print(json.load(open('version.json'))['version'])")
+          VERSION=$(python -c "import json; print(json.load(open('version.json'))['version'])" \
+            || { echo "ERROR: Could not read version from version.json"; exit 1; })
           TAG="v${VERSION}"
-          if git ls-remote --tags origin "${TAG}" | grep -q "${TAG}"; then
+          if git ls-remote --tags origin "${TAG}" | grep -q "refs/tags/${TAG}$"; then
             echo "Tag ${TAG} already exists – skipping release."
           else
             git tag "${TAG}"
