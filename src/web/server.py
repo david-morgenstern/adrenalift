@@ -77,6 +77,17 @@ def create_app() -> Flask:
     )
     jobs = JobManager()
 
+    # Deploy the bundled driver files next to the running exe at startup so
+    # WinRing0 (which looks for its .sys beside the host process) and InpOut32
+    # are ready before the first hardware op.  The desktop app already does this;
+    # the web console did not, so the frozen web exe relied on a lazy copy.
+    if os.name == "nt":
+        try:
+            from src.io.mmio import ensure_driver_files_copied
+            ensure_driver_files_copied()
+        except Exception as exc:  # noqa: BLE001 - never block server startup
+            print(f"[drivers] startup deploy skipped: {exc}")
+
     # Release the persistent hardware handle (and the WinRing0 driver service)
     # on a clean shutdown so the next launch starts from a known state.
     import atexit

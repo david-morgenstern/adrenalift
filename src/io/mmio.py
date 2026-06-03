@@ -148,13 +148,28 @@ def _make_write_mem_buf(phys_addr, data_bytes):
 # ---------------------------------------------------------------------------
 
 
-def ensure_driver_files_copied() -> None:
+def ensure_driver_files_copied(log=None) -> None:
+    """Copy the bundled InpOut32/WinRing0 driver files next to the host exe.
+
+    WinRing0's DLL resolves its ``.sys`` via ``GetModuleFileName(NULL)`` -- it
+    looks beside the *running* executable -- so the driver files must sit next
+    to ``python.exe`` (source run) or the frozen ``.exe``.  Call this once at
+    startup so the files are in place before any hardware op.
+
+    Sources are searched in the PyInstaller bundle (``sys._MEIPASS``) first, then
+    the source-tree ``drivers/`` folder.  Outcomes are reported via *log* (or
+    ``print``) instead of being silently swallowed, so "drivers not deployed" is
+    visible rather than mysterious.
     """
-    Copy InpOut32/WinRing0 driver files to the exe directory without loading them.
-    Call at app startup so first run matches post-restart layout (driver files
-    already present). This fixes first-run parse failures when drivers were
-    previously copied only during init_hardware.
-    """
+    def _say(msg):
+        if log is not None:
+            try:
+                log(msg)
+                return
+            except Exception:
+                pass
+        print(msg)
+
     py_dir = os.path.dirname(sys.executable)
     script_dir = os.path.dirname(os.path.abspath(
         sys.modules[__name__].__file__
@@ -164,11 +179,13 @@ def ensure_driver_files_copied() -> None:
     # Project root is parent of src/ (script_dir is src/io)
     project_root = os.path.dirname(os.path.dirname(script_dir))
     search_dirs = [
+        getattr(sys, "_MEIPASS", None),          # PyInstaller bundle root (frozen exe)
         os.path.join(project_root, "drivers"),
         project_root,
         script_dir,
         os.getcwd(),
     ]
+    search_dirs = [d for d in search_dirs if d]
     inpout_src = wr0_dll_src = wr0_sys_src = None
     for d in search_dirs:
         if inpout_src is None:
@@ -185,14 +202,30 @@ def ensure_driver_files_copied() -> None:
                 if os.path.isfile(p):
                     wr0_sys_src = p
                     break
+
+    if not inpout_src and not (wr0_dll_src and wr0_sys_src):
+        _say("[drivers] WARNING: no driver source files found. Searched: "
+             + "; ".join(search_dirs))
+        return
+
+    copied = []
     try:
         if inpout_src:
             shutil.copy2(inpout_src, os.path.join(py_dir, "inpoutx64.dll"))
+            copied.append("inpoutx64.dll")
         if wr0_dll_src and wr0_sys_src:
             shutil.copy2(wr0_dll_src, os.path.join(py_dir, "WinRing0x64.dll"))
             shutil.copy2(wr0_sys_src, os.path.join(py_dir, "WinRing0x64.sys"))
-    except OSError:
-        pass
+            copied += ["WinRing0x64.dll", "WinRing0x64.sys"]
+        _say(f"[drivers] deployed {', '.join(copied)} next to the exe: {py_dir}")
+    except OSError as e:
+        if getattr(e, "winerror", None) == 32:
+            _say(f"[drivers] a driver file at {py_dir} is already in use "
+                 "(already loaded) — reusing the existing copy.")
+        else:
+            _say(f"[drivers] WARNING: could not copy drivers to {py_dir}: {e}. "
+                 "Run Adrenalift from a writable folder (not from inside a .zip "
+                 "or a read-only location).")
 
 
 # ---------------------------------------------------------------------------
@@ -328,7 +361,10 @@ class WinRing0:
         ))
         project_root = os.path.dirname(os.path.dirname(script_dir))
         drivers_dir = os.path.join(project_root, "drivers")
-        search_dirs = list(dict.fromkeys([drivers_dir, project_root, script_dir, os.getcwd()]))
+        _meipass = getattr(sys, "_MEIPASS", None)  # PyInstaller bundle root (frozen exe)
+        search_dirs = list(dict.fromkeys(
+            ([_meipass] if _meipass else [])
+            + [drivers_dir, project_root, script_dir, os.getcwd()]))
 
         source_dll = source_sys = None
         patched_sys = None
