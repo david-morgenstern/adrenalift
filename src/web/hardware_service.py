@@ -137,11 +137,15 @@ def _acquire_hw(engine, *, want_dma: bool = False, discover: bool = False,
         # unreliable.  Record it so the UI can warn instead of failing silently.
         if hw.get("wr0") is None:
             _degraded_reason = (
-                "Limited mode: the WinRing0 physical-memory driver could not be "
-                "loaded, so memory scan and boost-clock patching are unreliable. "
-                "Close other monitoring / overclocking tools (HWiNFO, MSI "
-                "Afterburner / RivaTuner, GPU-Z, ZenTimings) and relaunch "
-                "Adrenalift. The power-limit control still works."
+                "Limited mode: the WinRing0 driver did not load, so the engine "
+                "is running on InpOut32 only. The power-limit control still "
+                "works; memory scan / OverDrive may be limited. Two common "
+                "causes — (1) the patched WinRing0 driver needs Windows "
+                "test-signing mode: run 'bcdedit /set testsigning on' in an "
+                "Administrator prompt and reboot (Secure Boot must be OFF in "
+                "BIOS for this to take effect); (2) another tool (HWiNFO, MSI "
+                "Afterburner / RivaTuner, GPU-Z, ZenTimings) is holding the "
+                "driver — close it and relaunch Adrenalift."
             )
         else:
             _degraded_reason = None
@@ -258,8 +262,12 @@ def _get_vbios_values_or_defaults():
 
     vbios = _get_vbios_values(DEFAULT_VBIOS_PATH)
     if vbios is None:
-        engine = _import_engine()
-        vbios = engine.parse_vbios_or_defaults(DEFAULT_VBIOS_PATH)
+        # parse_vbios_or_defaults lives in the VBIOS parser, not the engine --
+        # it returns built-in stock values when no ROM is present so a scan can
+        # still proceed.  (The engine has no such attribute; calling it there
+        # raised AttributeError and aborted the scan.)
+        from src.io.vbios_parser import parse_vbios_or_defaults
+        vbios = parse_vbios_or_defaults(DEFAULT_VBIOS_PATH)
     return vbios
 
 
