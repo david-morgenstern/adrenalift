@@ -4515,8 +4515,9 @@ def apply_od_settings(smu, virt, settings):
         results['od_commit'] = resp
         _elog(f"apply_od_settings: od_commit -> {_rn(resp)}")
     else:
-        _elog("apply_od_settings: read_od returned None -- skipping OD table "
-              "commit (deep scan / DMA buffer not available?)")
+        _elog("apply_od_settings: read_od returned None -- OD table commit "
+              "skipped (DMA buffer unavailable; run a deep scan to enable "
+              "OverDrive)")
 
     # Frequency limits
     effective_max = settings.effective_max

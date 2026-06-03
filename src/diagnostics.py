@@ -348,7 +348,8 @@ def log_environment_snapshot(log: Optional[Callable[[str], None]] = None,
     if log is None:
         import logging
         _logger = logging.getLogger("overclock")
-        log = lambda m: _logger.info(m)  # noqa: E731
+        def log(m):
+            _logger.info(m)
 
     sections = [
         _section_basic,
