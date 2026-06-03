@@ -104,6 +104,76 @@ def safe_message(exc: "HardwareUnavailable") -> str:
 # single shared resource and must not be entered concurrently.
 _hw_lock = threading.Lock()
 
+# Process-persistent hardware handle.  Created once on first use and reused by
+# every operation (scan / apply / status / metrics) so WinRing0 + InpOut are
+# *not* re-loaded and the driver service *not* re-installed on every call.
+# That per-call churn -- a fresh WinRing0() each time, each copying the .sys and
+# re-registering the WinRing0_1_2_0 service -- is what produced the WinError 32
+# sharing-violation interlock.  Torn down once, in shutdown_hardware().
+_engine_hw = None
+_degraded_reason: Optional[str] = None
+
+
+def _acquire_hw(engine, *, want_dma: bool = False, discover: bool = False,
+                gui_log: LogFn = None):
+    """Return the process-persistent hardware handle, creating it on first use.
+
+    The caller MUST hold ``_hw_lock``.  Never tears the handle down.  Raises on
+    initial-load failure (the handle is left uncached so the next call retries).
+
+    Args:
+        want_dma: also ensure the driver DMA buffer is mapped (needed for OD /
+            metrics).  Uses a cached offset; runs a full BAR scan only when
+            *discover* is True.
+        discover: allow the (slow) DMA BAR scan.  Only the deep scan sets this;
+            read paths leave it False so they fail fast instead of blocking.
+    """
+    global _engine_hw, _degraded_reason
+    if _engine_hw is None:
+        hw = engine.init_hardware(skip_dma_discovery=True, gui_log=gui_log)
+        _engine_hw = hw
+        # No WinRing0 => the engine fell back to InpOut32-only mode: the patched
+        # physical-memory path is gone, so scan / boost-clock patching will be
+        # unreliable.  Record it so the UI can warn instead of failing silently.
+        if hw.get("wr0") is None:
+            _degraded_reason = (
+                "Limited mode: the WinRing0 physical-memory driver could not be "
+                "loaded, so memory scan and boost-clock patching are unreliable. "
+                "Close other monitoring / overclocking tools (HWiNFO, MSI "
+                "Afterburner / RivaTuner, GPU-Z, ZenTimings) and relaunch "
+                "Adrenalift. The power-limit control still works."
+            )
+        else:
+            _degraded_reason = None
+    if want_dma and _engine_hw.get("virt") is None:
+        engine.ensure_dma_buffer(_engine_hw, gui_log=gui_log, discover=discover)
+    return _engine_hw
+
+
+def degraded_reason() -> Optional[str]:
+    """Human-readable reason the engine is running limited, or None.
+
+    Only meaningful once the hardware handle has been created at least once
+    (i.e. after the first scan / apply / status call this session).
+    """
+    with _hw_lock:
+        return _degraded_reason
+
+
+def shutdown_hardware() -> None:
+    """Release the persistent hardware handle (call once on server shutdown)."""
+    global _engine_hw, _degraded_reason
+    with _hw_lock:
+        hw, _engine_hw = _engine_hw, None
+        _degraded_reason = None
+    if hw is None:
+        return
+    try:
+        engine = _import_engine()
+        engine.cleanup_hardware(hw)
+    except Exception:  # noqa: BLE001
+        pass
+
 # Cached result of the most recent successful scan (mirrors the desktop
 # ``MainOverclockWidget.scan_result``).  Apply needs the valid addresses.
 _last_scan: Optional[Dict[str, Any]] = None
@@ -222,8 +292,10 @@ def run_scan(
         hw = None
         try:
             try:
-                hw = engine.init_hardware(
-                    skip_dma_discovery=not deep_scan,
+                hw = _acquire_hw(
+                    engine,
+                    want_dma=deep_scan,
+                    discover=deep_scan,
                     gui_log=(log if deep_scan else None),
                 )
             except Exception as exc:  # noqa: BLE001
@@ -271,11 +343,10 @@ def run_scan(
             log(summary["message"])
             return summary
         finally:
-            if hw:
-                try:
-                    engine.cleanup_hardware(hw)
-                except Exception:  # noqa: BLE001
-                    pass
+            # Persistent handle: not torn down per call (see _acquire_hw /
+            # shutdown_hardware). The lock release below ends the critical
+            # section.
+            pass
 
 
 def _scan_result_to_dict(result, *, dma_ok: bool) -> Dict[str, Any]:
@@ -358,7 +429,7 @@ def apply_boost_clock(
         hw = None
         try:
             try:
-                hw = engine.init_hardware(skip_dma_discovery=True)
+                hw = _acquire_hw(engine)
             except Exception as exc:  # noqa: BLE001
                 _log.warning("init_hardware failed: %s", exc)
                 raise HardwareUnavailable(
@@ -396,11 +467,10 @@ def apply_boost_clock(
                 "message": msg,
             }
         finally:
-            if hw:
-                try:
-                    engine.cleanup_hardware(hw)
-                except Exception:  # noqa: BLE001
-                    pass
+            # Persistent handle: not torn down per call (see _acquire_hw /
+            # shutdown_hardware). The lock release below ends the critical
+            # section.
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -441,7 +511,7 @@ def set_power_limit(
         hw = None
         try:
             try:
-                hw = engine.init_hardware(skip_dma_discovery=True)
+                hw = _acquire_hw(engine)
             except Exception as exc:  # noqa: BLE001
                 _log.warning("init_hardware failed: %s", exc)
                 raise HardwareUnavailable(
@@ -484,11 +554,10 @@ def set_power_limit(
                 "message": msg,
             }
         finally:
-            if hw:
-                try:
-                    engine.cleanup_hardware(hw)
-                except Exception:  # noqa: BLE001
-                    pass
+            # Persistent handle: not torn down per call (see _acquire_hw /
+            # shutdown_hardware). The lock release below ends the critical
+            # section.
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -497,13 +566,13 @@ def set_power_limit(
 # ---------------------------------------------------------------------------
 
 def _require_dma(engine):
-    """init_hardware reusing a cached DMA offset; raise if none is available."""
-    hw = engine.init_hardware(skip_dma_discovery=True)
+    """Persistent handle with the DMA buffer mapped from a cached offset.
+
+    Raises ``dma_unavailable`` if no deep scan has located the buffer this
+    session (never blocks on a full BAR scan -- that's the deep scan's job).
+    """
+    hw = _acquire_hw(engine, want_dma=True, discover=False)
     if hw.get("virt") is None:
-        try:
-            engine.cleanup_hardware(hw)
-        except Exception:  # noqa: BLE001
-            pass
         raise HardwareUnavailable(
             ERROR_MESSAGES["dma_unavailable"], code="dma_unavailable"
         )
@@ -558,11 +627,10 @@ def apply_gfx_offset(
             log(msg)
             return {"ok": True, "offset_mhz": offset_mhz, "message": msg}
         finally:
-            if hw:
-                try:
-                    engine.cleanup_hardware(hw)
-                except Exception:  # noqa: BLE001
-                    pass
+            # Persistent handle: not torn down per call (see _acquire_hw /
+            # shutdown_hardware). The lock release below ends the critical
+            # section.
+            pass
 
 
 def apply_od_ppt(
@@ -615,11 +683,10 @@ def apply_od_ppt(
             log(msg)
             return {"ok": True, "pct": pct, "message": msg}
         finally:
-            if hw:
-                try:
-                    engine.cleanup_hardware(hw)
-                except Exception:  # noqa: BLE001
-                    pass
+            # Persistent handle: not torn down per call (see _acquire_hw /
+            # shutdown_hardware). The lock release below ends the critical
+            # section.
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -720,11 +787,10 @@ def read_od_fields() -> Dict[str, Any]:
                     values[s["key"]] = None
             return {"ok": True, "values": values}
         finally:
-            if hw:
-                try:
-                    engine.cleanup_hardware(hw)
-                except Exception:  # noqa: BLE001
-                    pass
+            # Persistent handle: not torn down per call (see _acquire_hw /
+            # shutdown_hardware). The lock release below ends the critical
+            # section.
+            pass
 
 
 def apply_od_field(
@@ -777,11 +843,10 @@ def apply_od_field(
             log(msg)
             return {"ok": True, "key": key, "value": value, "message": msg}
         finally:
-            if hw:
-                try:
-                    engine.cleanup_hardware(hw)
-                except Exception:  # noqa: BLE001
-                    pass
+            # Persistent handle: not torn down per call (see _acquire_hw /
+            # shutdown_hardware). The lock release below ends the critical
+            # section.
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -875,7 +940,7 @@ def apply_pp_field(
         hw = None
         try:
             try:
-                hw = engine.init_hardware(skip_dma_discovery=True)
+                hw = _acquire_hw(engine)
             except Exception as exc:  # noqa: BLE001
                 _log.warning("init_hardware failed: %s", exc)
                 raise HardwareUnavailable(
@@ -896,11 +961,10 @@ def apply_pp_field(
             return {"ok": True, "offset": int(offset), "value": value,
                     "writes": res.get("writes", 0), "message": msg}
         finally:
-            if hw:
-                try:
-                    engine.cleanup_hardware(hw)
-                except Exception:  # noqa: BLE001
-                    pass
+            # Persistent handle: not torn down per call (see _acquire_hw /
+            # shutdown_hardware). The lock release below ends the critical
+            # section.
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -929,7 +993,7 @@ def apply_freq_limits(
         hw = None
         try:
             try:
-                hw = engine.init_hardware(skip_dma_discovery=True)
+                hw = _acquire_hw(engine)
             except Exception as exc:  # noqa: BLE001
                 _log.warning("init_hardware failed: %s", exc)
                 raise HardwareUnavailable(
@@ -955,11 +1019,10 @@ def apply_freq_limits(
             log(msg)
             return {"ok": True, "gfx_min": gfx_min, "gfx_max": gfx_max, "message": msg}
         finally:
-            if hw:
-                try:
-                    engine.cleanup_hardware(hw)
-                except Exception:  # noqa: BLE001
-                    pass
+            # Persistent handle: not torn down per call (see _acquire_hw /
+            # shutdown_hardware). The lock release below ends the critical
+            # section.
+            pass
 
 
 def apply_power_saving_lock(
@@ -975,7 +1038,7 @@ def apply_power_saving_lock(
         hw = None
         try:
             try:
-                hw = engine.init_hardware(skip_dma_discovery=True)
+                hw = _acquire_hw(engine)
             except Exception as exc:  # noqa: BLE001
                 _log.warning("init_hardware failed: %s", exc)
                 raise HardwareUnavailable(
@@ -997,11 +1060,10 @@ def apply_power_saving_lock(
             log(msg)
             return {"ok": True, "locked": bool(lock), "message": msg}
         finally:
-            if hw:
-                try:
-                    engine.cleanup_hardware(hw)
-                except Exception:  # noqa: BLE001
-                    pass
+            # Persistent handle: not torn down per call (see _acquire_hw /
+            # shutdown_hardware). The lock release below ends the critical
+            # section.
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -1134,7 +1196,7 @@ def read_status() -> Dict[str, Any]:
         hw = None
         try:
             try:
-                hw = engine.init_hardware(skip_dma_discovery=True)
+                hw = _acquire_hw(engine)
             except Exception as exc:  # noqa: BLE001
                 _log.warning("init_hardware failed: %s", exc)
                 raise HardwareUnavailable(
@@ -1154,11 +1216,10 @@ def read_status() -> Dict[str, Any]:
                 "dma_available": hw.get("virt") is not None,
             }
         finally:
-            if hw:
-                try:
-                    engine.cleanup_hardware(hw)
-                except Exception:  # noqa: BLE001
-                    pass
+            # Persistent handle: not torn down per call (see _acquire_hw /
+            # shutdown_hardware). The lock release below ends the critical
+            # section.
+            pass
 
 
 def read_metrics() -> Dict[str, Any]:
@@ -1168,7 +1229,7 @@ def read_metrics() -> Dict[str, Any]:
         hw = None
         try:
             try:
-                hw = engine.init_hardware(skip_dma_discovery=True)
+                hw = _acquire_hw(engine, want_dma=True, discover=False)
             except Exception as exc:  # noqa: BLE001
                 _log.warning("init_hardware failed: %s", exc)
                 raise HardwareUnavailable(
@@ -1186,11 +1247,10 @@ def read_metrics() -> Dict[str, Any]:
                 )
             return {"ok": True, "metrics": _jsonable(values)}
         finally:
-            if hw:
-                try:
-                    engine.cleanup_hardware(hw)
-                except Exception:  # noqa: BLE001
-                    pass
+            # Persistent handle: not torn down per call (see _acquire_hw /
+            # shutdown_hardware). The lock release below ends the critical
+            # section.
+            pass
 
 
 def _jsonable(values: Dict[str, Any]) -> Dict[str, Any]:

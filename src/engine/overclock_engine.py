@@ -2785,6 +2785,64 @@ def init_hardware(gui_log=None, skip_dma_discovery=False):
     }
 
 
+def ensure_dma_buffer(hw, gui_log=None, discover=True):
+    """Attach the driver's DMA buffer to an existing *hw* dict in place.
+
+    Lets a persistent handle created with ``init_hardware(skip_dma_discovery=
+    True)`` be upgraded to the full OD/metrics path *without* tearing down and
+    re-creating WinRing0/InpOut (which is what causes the driver-load churn).
+
+    When *discover* is False, only the (instant) in-memory/disk cache is tried;
+    the expensive BAR scan is skipped -- use this for read paths (metrics, OD
+    applies) that should reuse a prior deep scan but never block on one.
+
+    No-op (returns immediately) if the buffer is already mapped.  On failure
+    leaves ``hw['virt']`` as None and returns hw; callers must check.
+    """
+    if hw is None or hw.get('virt') is not None:
+        return hw
+    smu = hw.get('smu')
+    inpout = hw.get('inpout')
+    vram_bar = hw.get('vram_bar')
+    if smu is None or inpout is None or vram_bar is None:
+        return hw
+
+    # Fast path: offset already discovered earlier in this process / on disk.
+    mem_offset, mem_path = _get_inmemory_dma()
+    if mem_offset is None:
+        mem_offset = _load_dma_cache()
+        mem_path = f"disk-cached-0x{mem_offset:X}" if mem_offset else None
+    if mem_offset is not None:
+        drv_phys = vram_bar + mem_offset
+        try:
+            virt, handle = inpout.map_phys(drv_phys, 0x4000)
+            hw['virt'], hw['handle'] = virt, handle
+            hw['phys'], hw['dma_path'] = drv_phys, f"cached-{mem_path}"
+            _set_inmemory_dma(mem_offset, hw['dma_path'])
+            _elog(f"ensure_dma_buffer: OK via cache — {hw['dma_path']}")
+            return hw
+        except Exception as e:
+            _elog(f"ensure_dma_buffer: cached offset failed: {e}")
+
+    if not discover:
+        _elog("ensure_dma_buffer: no cached offset and discover=False — "
+              "DMA unavailable (run a deep scan first)")
+        return hw
+
+    # Slow path: full BAR scan for the driver's DMA buffer.
+    try:
+        vbios_values = _load_vbios_values()
+        virt, handle, phys, dma_path = _discover_dma_buffer(
+            smu, inpout, vram_bar, vbios_values=vbios_values, gui_log=gui_log)
+        hw['virt'], hw['handle'] = virt, handle
+        hw['phys'], hw['dma_path'] = phys, dma_path
+        _set_inmemory_dma(phys - vram_bar, dma_path)
+        _elog(f"ensure_dma_buffer: OK via discovery — dma_path={dma_path}")
+    except Exception as e:
+        _elog(f"ensure_dma_buffer: discovery failed: {e}")
+    return hw
+
+
 def cleanup_hardware(hw):
     """Release all hardware handles opened by init_hardware()."""
     try:

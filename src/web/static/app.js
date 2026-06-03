@@ -152,6 +152,7 @@ $("#scan-btn").addEventListener("click", async () => {
       $("#apply-btn").disabled = !scanReady;
       $("#scan-status").textContent = (result && result.message) || "Scan complete.";
       setProgress("scan", 100, "");
+      refreshState();
     },
     onError: (err) => {
       btn.disabled = false;
@@ -188,6 +189,7 @@ $("#apply-btn").addEventListener("click", async () => {
       btn.disabled = !scanReady;
       setProgress("apply", 100, "");
       logLine((result && result.message) || "Apply complete.");
+      refreshState();
     },
     onError: (err) => {
       btn.disabled = !scanReady;
@@ -254,6 +256,7 @@ async function runApplyJob({ url, body, btn, statusEl, busyMsg, progressKey, log
       if (status) status.textContent = m;
       log(m);
       if (onDone) onDone(result);
+      refreshState();
     },
     onError: (err) => {
       if (button) button.disabled = false;
@@ -355,7 +358,6 @@ $("#status-btn").addEventListener("click", async () => {
 // ---------------------------------------------------------------------------
 // Metrics
 // ---------------------------------------------------------------------------
-let metricsTimer = null;
 let metricsLayout = [];
 
 async function loadMetricsLayout() {
@@ -379,7 +381,6 @@ async function readMetrics() {
   const data = await r.json();
   if (!data.ok) {
     box.innerHTML = errorBox(data.error || "Metrics unavailable.");
-    stopAuto();
     return;
   }
   const m = data.metrics || {};
@@ -405,20 +406,6 @@ function formatMetric(v) {
 }
 
 $("#metrics-btn").addEventListener("click", readMetrics);
-$("#metrics-auto").addEventListener("change", (e) => {
-  if (e.target.checked) {
-    readMetrics();
-    metricsTimer = setInterval(readMetrics, 2000);
-  } else {
-    stopAuto();
-  }
-});
-function stopAuto() {
-  if (metricsTimer) clearInterval(metricsTimer);
-  metricsTimer = null;
-  const cb = $("#metrics-auto");
-  if (cb) cb.checked = false;
-}
 
 // ---------------------------------------------------------------------------
 // Help
@@ -962,6 +949,16 @@ async function init() {
 function renderBanner(state) {
   const banner = $("#banner");
   if (!state.engine) return;
+  // A degraded/limited-mode reason (e.g. WinRing0 failed to load -> InpOut32
+  // only) is the single most important thing to surface: it explains why scan
+  // and boost-clock won't stick while the power limit still works. It is only
+  // known once a hardware op has run this session, so it takes priority here.
+  if (state.degraded) {
+    banner.className = "banner warn";
+    banner.textContent = "⚠ " + state.degraded;
+    banner.classList.remove("hidden");
+    return;
+  }
   if (state.engine.available) {
     banner.className = "banner ok";
     banner.textContent = "GPU engine ready. Scan, then apply your boost clock.";
@@ -974,6 +971,17 @@ function renderBanner(state) {
       "Run on Windows as Administrator to enable overclocking.";
   }
   banner.classList.remove("hidden");
+}
+
+// Re-fetch engine state and refresh the banner. Called after hardware jobs so
+// the limited-mode warning appears as soon as the engine reports it (the
+// handle, and thus the degraded flag, only exists after the first op).
+async function refreshState() {
+  try {
+    renderBanner(await getJSON("/api/state"));
+  } catch (e) {
+    /* ignore */
+  }
 }
 
 init();
