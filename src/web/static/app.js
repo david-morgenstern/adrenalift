@@ -852,9 +852,18 @@ function wireSystem() {
     regRead().finally(() => ($("#reg-read-btn").disabled = false));
   });
   $("#reg-apply-btn").addEventListener("click", () => {
+    if (
+      !confirmPersistentAction({
+        actionLabel: "applying registry tweaks",
+        confirmToken: "APPLY",
+        statusEl: "#reg-status",
+      })
+    ) {
+      return;
+    }
     runApplyJob({
       url: "/api/registry/apply",
-      body: {},
+      body: { ack_persistent: true, confirm_text: "APPLY" },
       btn: "#reg-apply-btn",
       statusEl: "#reg-status",
       busyMsg: "Applying recommended registry tweaks…",
@@ -863,9 +872,18 @@ function wireSystem() {
     });
   });
   $("#reg-restore-btn").addEventListener("click", () => {
+    if (
+      !confirmPersistentAction({
+        actionLabel: "restoring registry tweaks",
+        confirmToken: "RESTORE",
+        statusEl: "#reg-status",
+      })
+    ) {
+      return;
+    }
     runApplyJob({
       url: "/api/registry/restore",
-      body: {},
+      body: { ack_persistent: true, confirm_text: "RESTORE" },
       btn: "#reg-restore-btn",
       statusEl: "#reg-status",
       busyMsg: "Restoring registry from backup…",
@@ -873,6 +891,31 @@ function wireSystem() {
       onDone: () => regRead(),
     });
   });
+}
+
+function confirmPersistentAction({ actionLabel, confirmToken, statusEl }) {
+  const status = statusEl ? $(statusEl) : null;
+  const warning = [
+    "⚠ Persistent change warning",
+    "",
+    "This System action writes or restores registry values that survive reboot.",
+    "Use this only if you understand the risks and recovery path.",
+    "",
+    "Click OK to continue.",
+  ].join("\n");
+  if (!window.confirm(warning)) {
+    if (status) status.textContent = `Cancelled ${actionLabel}.`;
+    return false;
+  }
+  const typed = window.prompt(
+    `Type ${confirmToken} to confirm ${actionLabel}.`,
+    ""
+  );
+  if ((typed || "").trim().toUpperCase() !== confirmToken) {
+    if (status) status.textContent = `Cancelled ${actionLabel}: confirmation text mismatch.`;
+    return false;
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------------------
