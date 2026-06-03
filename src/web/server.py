@@ -397,6 +397,24 @@ def create_app() -> Flask:
     @app.route("/api/registry/apply", methods=["POST"])
     def api_registry_apply():
         data = request.get_json(silent=True) or {}
+        if data.get("ack_persistent") is not True:
+            return jsonify(
+                {
+                    "error": (
+                        "Registry apply requires explicit acknowledgment: "
+                        "set 'ack_persistent' to true."
+                    )
+                }
+            ), 400
+        if str(data.get("confirm_text", "")).strip().upper() != "APPLY":
+            return jsonify(
+                {
+                    "error": (
+                        "Registry apply requires a double-check confirmation: "
+                        "set 'confirm_text' to 'APPLY'."
+                    )
+                }
+            ), 400
         values = data.get("values")  # optional custom {name: int}; None -> recommended
         if values is not None and not isinstance(values, dict):
             return jsonify({"error": "'values' must be an object."}), 400
@@ -410,6 +428,26 @@ def create_app() -> Flask:
 
     @app.route("/api/registry/restore", methods=["POST"])
     def api_registry_restore():
+        data = request.get_json(silent=True) or {}
+        if data.get("ack_persistent") is not True:
+            return jsonify(
+                {
+                    "error": (
+                        "Registry restore requires explicit acknowledgment: "
+                        "set 'ack_persistent' to true."
+                    )
+                }
+            ), 400
+        if str(data.get("confirm_text", "")).strip().upper() != "RESTORE":
+            return jsonify(
+                {
+                    "error": (
+                        "Registry restore requires a double-check confirmation: "
+                        "set 'confirm_text' to 'RESTORE'."
+                    )
+                }
+            ), 400
+
         def target(progress, log):
             progress(20, "Restoring registry from backup…")
             return registry.restore()
