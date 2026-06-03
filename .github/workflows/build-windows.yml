@@ -5,8 +5,10 @@ name: Build Windows exe
 # - On every push to main / PR / manual run: uploads the .exe files as a
 #   downloadable workflow *artifact* (grab them from the run's "Artifacts"
 #   section; requires being signed in to GitHub, kept for 90 days).
-# - On pushing a version tag like `v0.1.4`: also publishes a GitHub *Release*
-#   with the .exe files attached, giving a permanent public download link.
+# - On push to main: reads the version from version.json, and if the
+#   corresponding tag (e.g. v0.1.6) does not yet exist, creates it and
+#   publishes a GitHub *Release* with the .exe files attached automatically.
+# - On pushing a version tag like `v0.1.6` manually: same release behaviour.
 
 on:
   push:
@@ -16,7 +18,7 @@ on:
   workflow_dispatch:        # lets you run it by hand from the Actions tab
 
 permissions:
-  contents: write           # needed to create a Release on tag builds
+  contents: write           # needed to create a Release and push tags
 
 jobs:
   build:
@@ -54,7 +56,25 @@ jobs:
           path: dist/*.exe
           if-no-files-found: error
 
-      - name: Publish Release (tag builds only)
+      - name: Auto-tag and publish Release (main push builds only)
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(python -c "import json; print(json.load(open('version.json'))['version'])")
+          TAG="v${VERSION}"
+          if git ls-remote --tags origin "${TAG}" | grep -q "${TAG}"; then
+            echo "Tag ${TAG} already exists – skipping release."
+          else
+            git tag "${TAG}"
+            git push origin "${TAG}"
+            gh release create "${TAG}" dist/*.exe \
+              --title "Adrenalift ${TAG}" \
+              --generate-notes
+          fi
+
+      - name: Publish Release (manual tag builds only)
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         env:
