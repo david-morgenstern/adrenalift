@@ -23,6 +23,22 @@ body:
     validations:
       required: true
 
+  - type: dropdown
+    id: area
+    attributes:
+      label: Related Area
+      options:
+        - Tweaking (clocks / voltage / memory / power)
+        - Cooling (fan curve)
+        - Monitoring (charts / metrics / CSV export)
+        - Stress test
+        - Profiles
+        - Calibration / V·F curve
+        - App / UI / settings
+        - Other / new area
+    validations:
+      required: false
+
   - type: textarea
     id: alternatives
     attributes:

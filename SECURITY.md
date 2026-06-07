@@ -2,7 +2,9 @@
 
 ## Scope
 
-Adrenalift writes directly to physical memory and communicates with the GPU's System Management Unit (SMU). Security issues in this project could lead to privilege escalation, arbitrary memory writes, or system instability.
+Adrenalift performs low-level GPU control. In **Safe mode** it talks to the GPU through the AMD display driver; in **Advanced mode** it additionally loads a small kernel-level helper driver (InpOut) for deeper telemetry and clock-limit access. Because of this, security issues in Adrenalift could potentially lead to privilege escalation, unsafe hardware access, or system instability, and are taken seriously.
+
+This policy covers the official Adrenalift application distributed through the project's own channels. Issues in third-party components (e.g. the AMD driver, the InpOut helper driver, or the operating system) should be reported to their respective vendors.
 
 ## Supported Versions
 
@@ -10,6 +12,8 @@ Adrenalift writes directly to physical memory and communicates with the GPU's Sy
 |---------|-----------|
 | Latest release | Yes |
 | Older releases | No |
+
+Always update to the latest release before reporting — older builds are not patched.
 
 ## Reporting a Vulnerability
 
@@ -20,15 +24,15 @@ Instead, please report them privately using one of the following methods:
 1. **GitHub Private Vulnerability Reporting:**
    Go to [Security Advisories](https://github.com/miklebel/adrenalift/security/advisories) and click "Report a vulnerability."
 
-2. **Email:**
-   Contact the maintainer directly at the email listed on the [GitHub profile](https://github.com/miklebel).
+2. **Direct contact:**
+   Reach the maintainer through the contact method listed on the [GitHub profile](https://github.com/miklebel).
 
 ### What to include
 
 - Description of the vulnerability
 - Steps to reproduce
-- Affected version(s)
-- Potential impact (e.g., arbitrary memory write, privilege escalation)
+- Affected version(s) and mode (Safe / Advanced)
+- Potential impact (e.g., privilege escalation, unsafe hardware access)
 
 ### Response timeline
 

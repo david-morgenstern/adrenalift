@@ -1,100 +1,38 @@
 # Contributing to Adrenalift
 
-Thank you for your interest in contributing! This guide will help you get started.
+Thanks for your interest in Adrenalift! 🎉
 
-## Getting Started
+Adrenalift is **closed-source, proprietary software** (see [LICENSE](LICENSE)). The source code is not publicly available, and this repository exists to **host official releases, documentation, and the issue tracker** — not to accept code.
 
-### Prerequisites
+That doesn't mean you can't help. The most valuable contributions are good bug reports and well-described feature ideas, and they genuinely shape where the app goes next.
 
-- **Python 3.10+**
-- **pip**
-- **Windows 10+** (64-bit) for runtime testing
-- **AMD GPU** (RDNA4 primary, RDNA3 experimental)
+## What this means
 
-### Development Setup
+- **No source code is published here**, so there is nothing to clone, build, or compile.
+- **Pull requests are not accepted** — the repository contains no application source. Any code PR will be closed.
+- **Bug reports and feature requests are very welcome** and are the main way to contribute.
 
-1. **Clone the repository:**
+## Reporting a bug
 
-```bash
-git clone https://github.com/miklebel/adrenalift.git
-cd adrenalift
-```
+1. Search [existing issues](https://github.com/miklebel/adrenalift/issues) first — your problem may already be reported.
+2. Open a new issue with the **Bug Report** template: <https://github.com/miklebel/adrenalift/issues/new/choose>
+3. Include your **GPU model**, **AMD driver version**, **Windows version**, **Adrenalift version**, and whether you were in **Safe** or **Advanced** mode.
+4. **Attach diagnostics.** In Adrenalift open **Settings → Export logs → Export…** to save a zip (logs + diagnostics) and attach it to the issue. This is by far the most helpful thing you can include.
 
-2. **Install dependencies:**
+## Suggesting a feature
 
-```bash
-pip install -r requirements.txt
-```
+1. Open a new issue with the **Feature Request** template: <https://github.com/miklebel/adrenalift/issues/new/choose>
+2. Describe the **use case** — what you're trying to achieve — not just the proposed solution.
 
-3. **Clone UPP (external dependency):**
+## Reporting a security issue
 
-```bash
-cd deps
-git clone https://github.com/sibradzic/upp.git
-cd ..
-```
+Please do **not** open a public issue for security vulnerabilities. Follow the process in [SECURITY.md](SECURITY.md).
 
-4. **Place driver binaries** in `drivers/`:
-   - `inpoutx64.dll`
-   - `WinRing0x64.dll`
-   - `WinRing0x64.sys`
+## Other ways to help
 
-### Building
+- ⭐ Star and share the project so other RDNA 4 owners can find it.
+- ☕ [Buy me a coffee](https://www.buymeacoffee.com/miklebel) — Adrenalift is built by a solo developer and every bit of support helps.
 
-```powershell
-.\build.ps1
-```
+## Be respectful
 
-Or manually:
-
-```bash
-python -m PyInstaller --noconfirm build.spec
-```
-
-## How to Contribute
-
-### Reporting Bugs
-
-- Use the **Bug Report** template when [opening a new issue](https://github.com/miklebel/adrenalift/issues/new/choose).
-- Include your GPU model, driver version, Windows version, and Adrenalift version.
-- Attach the `overclock_log.txt` file from the folder where the executable is located.
-
-### Suggesting Features
-
-- Use the **Feature Request** template when [opening a new issue](https://github.com/miklebel/adrenalift/issues/new/choose).
-- Describe the use case, not just the solution.
-
-### Pull Requests
-
-1. **Fork** the repository and create a branch from `main`.
-2. Keep changes focused — one feature or fix per PR.
-3. Test your changes on real hardware if possible, or clearly state what was and wasn't tested.
-4. Update the README if your change affects usage or build instructions.
-5. Open a pull request against `main` using the PR template.
-
-### What We're Looking For
-
-- **RDNA3 testing and fixes** — RDNA3 support exists but is untested.
-- **Bug reports with logs** — especially driver crashes, BSODs, or incorrect clock behavior.
-- **Documentation improvements** — clearer explanations, typo fixes, additional examples.
-- **New GPU family support** — extending PowerPlay table parsing to other architectures.
-- **Safety improvements** — better validation, bounds checking, error handling.
-
-## Code Style
-
-- No strict linter is enforced yet, but keep code readable and consistent with the existing style.
-- Avoid adding comments that merely narrate what the code does.
-- Meaningful variable names over short abbreviations.
-
-## Safety Notice
-
-This project interacts with hardware at a low level. If you are contributing code that writes to physical memory, SMU mailboxes, or modifies driver state:
-
-- **Validate all offsets and sizes** before writing.
-- **Bounds-check** any user-supplied values.
-- **Fail safely** — prefer doing nothing over corrupting memory.
-- **Document assumptions** about hardware behavior.
-
-## License
-
-By contributing, you agree that your contributions will be licensed under the [GNU General Public License v3.0](LICENSE).
+All interactions here are covered by our [Code of Conduct](CODE_OF_CONDUCT.md). Please keep discussions constructive and kind.

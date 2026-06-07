@@ -1,166 +1,92 @@
 # Adrenalift
 
-**Unlock the real boost clock potential of your AMD GPU on Windows.**
+A modern overclocking and tuning utility for **AMD Radeon RX 9000 series (RDNA 4)** graphics cards on Windows.
 
-Adrenalift is a Windows utility that bypasses artificial clock limits imposed by the AMD Windows display driver. It locates the driver's cached PowerPlay (PP) table in memory and patches the boost clock ceiling so your GPU can reach the frequencies it is actually capable of.
+Adrenalift gives you precise, real-time control over your GPU — clocks, voltage, memory, power, cooling and monitoring — in one clean, native app. Every change is applied live and is fully temporary: reboot and your card is back to stock. Nothing is flashed, nothing is permanent.
 
-> **RDNA4** is the primary target. RDNA3 support is present in the code but has not been tested.
+<p align="center">
+  <img src="assets/tweaking.png" alt="Adrenalift — Tweaking tab with live V/F curve" width="860">
+</p>
 
----
-
-## The Problem
-
-On Linux, users have full control over GPU clocks and power through the kernel's `pp_od_clk_voltage` sysfs interface. The open-source `amdgpu` driver exposes OverDrive knobs directly — you can raise the boost clock, adjust the power limit, and the hardware will comply up to its physical limits.
-
-On Windows, the story is very different. The AMD display driver (`amdkmdag.sys`) enforces a **clock gating policy at the driver level**: even when the silicon can sustain higher frequencies, the driver's internal limits prevent the GPU from ever reaching them. The overclocking sliders exposed by the official software are constrained to a narrow range defined by the driver's cached copy of the PowerPlay table, not by the hardware itself. In practice this means your GPU may be leaving significant performance on the table — held back purely by software.
-
-## How Adrenalift Works
-
-1. **Scan** — the tool scans physical memory for the driver's cached PowerPlay table, locating the exact byte offsets that define the boost clock ceiling.
-2. **Patch** — it writes new values directly into the driver's in-memory cache, raising (or lowering) the maximum allowed boost clock.
-3. **Apply** — the patched limits take effect immediately. No reboot is required, and the changes are non-persistent: a reboot restores stock values.
-
-Because the patch lives only in RAM, it is inherently safe to revert — just restart the machine.
-
-> Other features (SMU OverDrive table, D3DKMTEscape path, registry tweaks, SPPT cache editing) are work-in-progress and may not work reliably for all configurations. They are documented within the application's UI.
-
----
-
-## Warning
-
-> **USE AT YOUR OWN RISK.**
->
-> This tool writes directly to physical memory and communicates with the GPU's System Management Unit. Incorrect use can cause **driver crashes, blue screens (BSOD), display corruption, or — in extreme cases — hardware damage** from running outside manufacturer-validated operating parameters.
->
-> - Overclocking may void your GPU warranty.
-> - Always start with small increments above stock and test for stability.
-> - The authors accept **no responsibility** for any damage to hardware or data.
-> - **Administrator privileges are required.** The application's manifest requests elevation automatically.
+<p align="center">
+  💬 <a href="https://www.overclock.net/threads/adrenalift-%E2%80%94-unlock-boost-clocks-on-rdna4-windows-pp-table-patcher.1819169">Join the discussion on Overclock.net</a>
+</p>
 
 ---
 
 ## Requirements
 
-- **Windows 10+** (64-bit)
-- **AMD RDNA4 GPU** (RDNA3 untested)
-- **Administrator privileges**
-- A VBIOS dump (`bios/vbios.rom`) — the app will prompt you to supply one if not found
+- **Windows 11** (64-bit)
+- An **AMD Radeon RX 9000 series (RDNA 4)** GPU. Adrenalift is built for the RDNA 4 family. RDNA 3 and older are untested and unsupported.
+- A current **AMD Adrenalin** driver installed
+- **Administrator privileges** — needed to read GPU telemetry and apply settings
+
+> Overclocking is done at your own risk. All changes are non-persistent and revert on reboot, so any unstable setting is undone with a simple restart.
 
 ---
 
-## Quick Start (pre-built)
+## Features
 
-1. Download the latest `Adrenalift_x.x_xx.exe` from releases.
-2. Place your VBIOS ROM in the `bios/` folder next to the executable (or let the app prompt you).
-3. Run the executable — it will request admin elevation.
-4. Use the **Simple** tab to raise the boost clock and apply.
+### Tweaking
+Dial in your card with a clean, focused set of controls:
 
----
+- **GPU core clock offset** — add headroom on top of the stock boost clock
+- **Undervolting** — lower the operating voltage to run cooler and quieter
+- **Memory clock & fast timings** — raise the memory clock and tighten timings for more bandwidth
+- **Clock limits** — set a floor and ceiling for how high and low the GPU is allowed to clock *(Advanced mode)*
+- **Power limit** — give the card more (or less) power budget
+- **Hold max clock** — keep the GPU pinned at its top clock instead of idling down
 
-## Building from Source
+A live **voltage/frequency curve**, built from a quick on-device calibration, shows exactly how your settings reshape the card's behaviour *before* you commit them. Save your favourite setups as **profiles** and switch between them instantly.
 
-### Prerequisites
+### Cooling
+Take full control of your fans:
 
-- **Python 3.10+**
-- **pip** (ships with Python)
+- A **5-point fan curve** you drag into shape
+- A simple **fixed-speed** mode, or the **stock** profile when you want hands-off
+- **Zero-RPM** for silent fans at idle
 
-### Steps
+### Monitoring
+Keep an eye on everything that matters:
 
-1. **Install Python dependencies:**
+- **Live charts** for clocks, voltages, temperatures, power and more
+- A **metric picker** so you plot only what you care about
+- **CSV export** for logging and later analysis
 
-```bash
-pip install -r requirements.txt
-```
+### Built-in stress test
+Validate your overclock without leaving the app. A built-in GPU load scene pushes the card toward its real power and thermal limits, with **adjustable intensity** and an optional **frame-rate cap** so you can probe behaviour at different operating points.
 
-2. **Clone external dependencies:**
+### Safe & Advanced modes
+Adrenalift runs in one of two modes, switchable any time from the top bar.
 
-```bash
-cd deps
-git clone https://github.com/sibradzic/upp.git
-```
+**Safe mode** *(default)* talks to your GPU through the AMD driver directly, with **no extra kernel drivers loaded**. It's the most compatible option — it sits happily alongside anti-cheat–protected games and won't be flagged by security software. You still get the core controls: clock offset, undervolt, memory, power limit and cooling. The trade-off is that the **richer telemetry** and the **soft clock floor/ceiling limits** aren't available in this mode.
 
-After cloning, the directory layout should look like:
+**Advanced mode** loads a small low-level helper driver (InpOut) to reach deeper into the GPU. This unlocks the **full telemetry set** and the **soft clock limits**, which open up more tuning potential. Because it loads a kernel-level driver, **some antivirus or anti-cheat software may flag or block it** — so it's best to keep Advanced mode off while playing anti-cheat–protected games, and you may need to allow the helper driver in your security software. You can switch back to Safe mode at any time.
 
-```
-adrenalift/
-├── deps/
-│   └── upp/          ← cloned repo (git-ignored)
-│       └── src/
-│           └── upp/
-├── src/
-├── build.spec
-└── ...
-```
-
-3. **Place driver binaries** in `drivers/`:
-   - `inpoutx64.dll`
-   - `WinRing0x64.dll`
-   - `WinRing0x64.sys`
-   - `WinRing0x64_patched.sys` (optional — removes the 1 MB physical memory restriction)
-
-   See **[DRIVERS.md](DRIVERS.md)** for details on each driver, what the patched version changes, and how to independently verify the patch with `python tools/verify_patch.py`.
-
-4. **Build:**
-
-```powershell
-.\build.ps1
-```
-
-Or manually:
-
-```bash
-python -m PyInstaller --noconfirm build.spec
-```
-
-The output `.exe` is written to `dist/`.
-
-### UPP (Uplift Power Play)
-
-UPP provides RDNA3/RDNA4 PowerPlay table decoding (`upp.decode`, `upp.atom_gen`).
-
-**Repository:** https://github.com/sibradzic/upp.git
-
-- **Runtime:** `src/io/vbios_parser.py` and `src/tools/sppt_cache.py` add `deps/upp/src` to `sys.path` so `from upp import decode` resolves locally.
-- **Build (PyInstaller):** `build.spec` adds the same path to `pathex` and lists UPP sub-modules in `hiddenimports` so the bundled `.exe` includes everything.
-- **Fallback:** If `deps/upp` is missing the app still runs, but VBIOS parsing will be unavailable. A warning is printed at build time and at runtime.
-
-To update UPP:
-
-```bash
-cd deps/upp
-git pull
-```
+### Made yours
+- Four themes — **Dark**, **Dark Warm**, **Light** and **Paper** — plus accent colours
+- **Close-to-tray**, **start minimized**, and **start with Windows**
+- Adjustable telemetry polling rate
 
 ---
 
-## Project Structure
+## Credits
 
-```
-src/
-├── app/                 # PySide6 GUI, settings, background workers
-│   ├── main.py          # Entry point, main window, tab layout
-│   ├── workers.py       # QThread workers (scan, apply, metrics, etc.)
-│   ├── settings.py      # Persistent settings (settings.json)
-│   └── ...
-├── engine/              # Core overclock logic
-│   ├── overclock_engine.py   # Scan, patch, apply, verify, watchdog
-│   ├── od_table.py           # OverDrive table structures & controller
-│   ├── smu.py                # SMU mailbox protocol & message IDs
-│   └── smu_metrics.py        # GPU metrics parsing
-├── io/                  # Hardware & OS interfaces
-│   ├── mmio.py               # WinRing0 / InpOut physical memory & MMIO
-│   ├── d3dkmt_escape.py      # D3DKMTEscape (WDDM) path
-│   ├── vbios_parser.py       # VBIOS ROM parsing (stock values)
-│   └── ...
-└── tools/               # CLI tools & reverse-engineering utilities
-    ├── overclock_cli.py       # Command-line interface
-    ├── reg_patch.py           # Registry tweaks (ULPS, clock gating keys)
-    ├── sppt_cache.py          # PP_PhmSoftPowerPlayTable builder
-    └── ...                    # Frida scripts, Ghidra helpers, probes
-```
+Adrenalift stands on the shoulders of the RDNA overclocking community.
+
+- **fpsflow** — for the foundational research on raising RDNA 3 / RDNA 4 desktop-class power, current and voltage limits and adding VID offsets. Adrenalift works best paired with his work. Read his write-up here: [Increasing RDNA3/RDNA4 desktop-class power limits and adding VID offsets](https://www.overclock.net/threads/increasing-rdna3-rdna4-desktop-class-power-limits-and-adding-vid-offsets.1816083).
+- **[nik2234](https://www.overclock.net/members/nik2234.648545/)** — for getting me into RDNA 4 and opening the door to the overclocking community, for being the project's voice of reason, and for serving as its main tester. Adrenalift wouldn't be what it is without him.
 
 ---
 
-## License
+## Support
 
-This project is licensed under the **GNU General Public License v3.0**. See [LICENSE](LICENSE) for details.
+Adrenalift is built and maintained by a solo developer. If it earned a place in your setup, you can help keep development moving:
+
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://www.buymeacoffee.com/miklebel)
+
+☕ **[Buy me a coffee](https://www.buymeacoffee.com/miklebel)** — every contribution genuinely helps and is hugely appreciated.
+
+---
+
+© 2026 Adrenalift. All rights reserved. Adrenalift is closed-source software.
